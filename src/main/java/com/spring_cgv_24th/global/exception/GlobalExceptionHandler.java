@@ -6,13 +6,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(com.spring_cgv_24th.global.exception.CustomException.class)
-    public ResponseEntity<ApiResponse<Void>> handleCustomException(com.spring_cgv_24th.global.exception.CustomException e) {
+    @ExceptionHandler(CustomException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCustomException(CustomException e) {
         ErrorCode errorCode = e.getErrorCode();
         return ResponseEntity
                 .status(errorCode.getHttpStatus())
@@ -31,6 +32,14 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.onFailure(ErrorCode.BAD_REQUEST.getCode(), message, null));
     }
 
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTypeMismatchException(MethodArgumentTypeMismatchException e) {
+        ErrorCode errorCode = ErrorCode.BAD_REQUEST;
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(ApiResponse.onFailure(errorCode.getCode(), errorCode.getMessage(), null));
+    }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception e) {
