@@ -26,13 +26,9 @@ public class Theater extends BaseCreatedEntity {
     @Column(name = "address", nullable = false, length = 255)
     private String address;
 
-    @Column(name = "phone_number", length = 20)
-    private String phoneNumber;
-
     @Builder
-    public Theater(String name, String address, String phoneNumber) {
+    public Theater(String name, String address) {
         this.name = name;
         this.address = address;
-        this.phoneNumber = phoneNumber;
     }
 }
