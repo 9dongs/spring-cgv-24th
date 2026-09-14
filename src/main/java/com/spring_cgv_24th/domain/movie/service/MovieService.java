@@ -1,5 +1,6 @@
 package com.spring_cgv_24th.domain.movie.service;
 
+import com.spring_cgv_24th.domain.movie.dto.request.MovieReqDTO;
 import com.spring_cgv_24th.domain.movie.dto.response.MovieResDTO;
 import com.spring_cgv_24th.domain.movie.entity.Movie;
 import com.spring_cgv_24th.domain.movie.repository.MovieRepository;
@@ -17,6 +18,20 @@ import org.springframework.transaction.annotation.Transactional;
 public class MovieService {
 
     private final MovieRepository movieRepository;
+
+    @Transactional
+    public MovieResDTO createMovie(MovieReqDTO.CreateMovieDTO request) {
+        Movie movie = Movie.builder()
+                .title(request.title().strip())
+                .description(request.description())
+                .durationMinutes(request.durationMinutes().shortValue())
+                .ageRating(request.ageRating().strip())
+                .releaseDate(request.releaseDate())
+                .posterUrl(request.posterUrl())
+                .build();
+
+        return MovieResDTO.from(movieRepository.save(movie));
+    }
 
     public MovieResDTO getMovie(Long movieId) {
         Movie movie = movieRepository.findById(movieId)

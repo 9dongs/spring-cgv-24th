@@ -26,6 +26,10 @@ public class ApiResponse<T> {
         return new ApiResponse<>(true, "COMMON200", message, data);
     }
 
+    public static <T> ApiResponse<T> onCreated(T data) {
+        return new ApiResponse<>(true, "COMMON201", "생성되었습니다.", data);
+    }
+
     public static <T> ApiResponse<T> onFailure(String code, String message, T data) {
         return new ApiResponse<>(false, code, message, data);
     }
