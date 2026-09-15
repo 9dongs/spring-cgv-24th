@@ -1,11 +1,11 @@
 package com.spring_cgv_24th.domain.store.entity;
 
 import com.spring_cgv_24th.domain.theater.entity.Theater;
+import com.spring_cgv_24th.global.exception.CustomException;
+import com.spring_cgv_24th.global.exception.ErrorCode;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -42,6 +42,19 @@ public class TheaterStock {
         this.theater = theater;
         this.product = product;
         this.quantity = quantity;
+        this.updatedAt = LocalDateTime.now();
     }
 
+    public void decreaseQuantity(int purchaseQuantity) {
+        if (purchaseQuantity <= 0) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+        // 구매 후에도 재고가 최소 1개 남아야 한다.
+        if (quantity <= purchaseQuantity) {
+            throw new CustomException(ErrorCode.STORE_STOCK_INSUFFICIENT);
+        }
+
+        quantity -= purchaseQuantity;
+        updatedAt = LocalDateTime.now();
+    }
 }
