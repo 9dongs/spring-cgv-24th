@@ -28,7 +28,11 @@ public enum ErrorCode {
     SEAT_ALREADY_RESERVED(HttpStatus.CONFLICT, "SEAT409", "이미 예매된 좌석입니다."),
     RESERVATION_NOT_FOUND(HttpStatus.NOT_FOUND, "RESERVATION404", "예매를 찾을 수 없습니다."),
     RESERVATION_FORBIDDEN(HttpStatus.FORBIDDEN, "RESERVATION403", "본인의 예매만 취소할 수 있습니다."),
-    RESERVATION_ALREADY_CANCELLED(HttpStatus.CONFLICT, "RESERVATION409", "이미 취소된 예매입니다.");
+    RESERVATION_ALREADY_CANCELLED(HttpStatus.CONFLICT, "RESERVATION409", "이미 취소된 예매입니다."),
+
+    // 영화관 찜
+    THEATER_FAVORITE_NOT_FOUND(HttpStatus.NOT_FOUND, "THEATER_FAVORITE404", "영화관 찜을 찾을 수 없습니다."),
+    THEATER_FAVORITE_ALREADY_EXISTS(HttpStatus.CONFLICT, "THEATER_FAVORITE409", "이미 찜한 영화관입니다.");
     private final HttpStatus httpStatus;
     private final String code;
     private final String message;
