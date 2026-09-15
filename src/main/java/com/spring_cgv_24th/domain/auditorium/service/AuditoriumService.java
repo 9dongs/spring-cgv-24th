@@ -27,7 +27,7 @@ public class AuditoriumService {
     public AuditoriumResDTO createAuditorium(Long theaterId, AuditoriumReqDTO.CreateAuditoriumDTO request) {
         Theater theater = theaterRepository.findById(theaterId)
                 .orElseThrow(() -> new CustomException(ErrorCode.THEATER_NOT_FOUND));
-        AuditoriumType type = auditoriumTypeRepository.findById(request.typeId())
+        AuditoriumType type = auditoriumTypeRepository.findByKind(request.kind())
                 .orElseThrow(() -> new CustomException(ErrorCode.AUDITORIUM_TYPE_NOT_FOUND));
 
         Auditorium auditorium = Auditorium.builder()
