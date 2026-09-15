@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "Movie", description = "영화 조회·생성 API")
+@Tag(name = "Movie", description = "영화 API")
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/movies")

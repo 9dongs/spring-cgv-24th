@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "TheaterFavorite", description = "영화관 찜 추가·해제·목록 조회 API")
+@Tag(name = "TheaterFavorite", description = "영화관 찜 API")
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/theaters")

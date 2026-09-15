@@ -10,7 +10,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-@Tag(name = "Theater", description = "영화관 조회 API")
+@Tag(name = "Theater", description = "영화관 API")
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/theaters")
