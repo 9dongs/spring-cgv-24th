@@ -5,10 +5,12 @@ import com.spring_cgv_24th.domain.favorite.entity.TheaterFavorite;
 import com.spring_cgv_24th.domain.favorite.repository.TheaterFavoriteRepository;
 import com.spring_cgv_24th.domain.member.entity.Member;
 import com.spring_cgv_24th.domain.member.repository.MemberRepository;
+import com.spring_cgv_24th.domain.theater.dto.TheaterResDTO;
 import com.spring_cgv_24th.domain.theater.entity.Theater;
 import com.spring_cgv_24th.domain.theater.repository.TheaterRepository;
 import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,5 +52,14 @@ public class TheaterFavoriteService {
         TheaterFavorite favorite = theaterFavoriteRepository.findByMember_IdAndTheater_Id(memberId, theaterId)
                 .orElseThrow(() -> new CustomException(ErrorCode.THEATER_FAVORITE_NOT_FOUND));
         theaterFavoriteRepository.delete(favorite);
+    }
+
+    public List<TheaterResDTO> getFavorites(Long memberId) {
+        if (!memberRepository.existsById(memberId)) {
+            throw new CustomException(ErrorCode.MEMBER_NOT_FOUND);
+        }
+        return theaterFavoriteRepository.findAllByMember_IdOrderByIdDesc(memberId).stream()
+                .map(favorite -> TheaterResDTO.from(favorite.getTheater()))
+                .toList();
     }
 }
