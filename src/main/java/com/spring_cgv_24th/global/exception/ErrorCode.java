@@ -9,11 +9,26 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON500", "서버 오류가 발생했습니다."),
     BAD_REQUEST(HttpStatus.BAD_REQUEST, "COMMON400", "잘못된 요청입니다."),
+
+    // 영화관
     THEATER_NOT_FOUND(HttpStatus.NOT_FOUND, "THEATER404", "영화관을 찾을 수 없습니다."),
+
+    // 영화
     MOVIE_NOT_FOUND(HttpStatus.NOT_FOUND, "MOVIE404", "영화를 찾을 수 없습니다."),
+
+    // 상영관
     AUDITORIUM_NOT_FOUND(HttpStatus.NOT_FOUND, "AUDITORIUM404", "상영관을 찾을 수 없습니다."),
+    AUDITORIUM_TYPE_NOT_FOUND(HttpStatus.NOT_FOUND, "AUDITORIUM_TYPE404", "상영관 유형을 찾을 수 없습니다."),
     SCREENING_NOT_FOUND(HttpStatus.NOT_FOUND, "SCREENING404", "상영 회차를 찾을 수 없습니다."),
-    SCREENING_OVERLAP(HttpStatus.CONFLICT, "SCREENING409", "상영관의 다른 회차와 시간이 겹칩니다.");
+    SCREENING_OVERLAP(HttpStatus.CONFLICT, "SCREENING409", "상영관의 다른 회차와 시간이 겹칩니다."),
+
+    // 예매
+    MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "MEMBER404", "회원을 찾을 수 없습니다."),
+    SCREENING_SEAT_NOT_FOUND(HttpStatus.NOT_FOUND, "SEAT404", "해당 회차의 좌석을 찾을 수 없습니다."),
+    SEAT_ALREADY_RESERVED(HttpStatus.CONFLICT, "SEAT409", "이미 예매된 좌석입니다."),
+    RESERVATION_NOT_FOUND(HttpStatus.NOT_FOUND, "RESERVATION404", "예매를 찾을 수 없습니다."),
+    RESERVATION_FORBIDDEN(HttpStatus.FORBIDDEN, "RESERVATION403", "본인의 예매만 취소할 수 있습니다."),
+    RESERVATION_ALREADY_CANCELLED(HttpStatus.CONFLICT, "RESERVATION409", "이미 취소된 예매입니다.");
     private final HttpStatus httpStatus;
     private final String code;
     private final String message;
