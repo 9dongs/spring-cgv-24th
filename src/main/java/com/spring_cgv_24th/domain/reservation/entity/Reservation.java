@@ -6,9 +6,6 @@ import com.spring_cgv_24th.domain.screening.entity.Screening;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
-import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -28,8 +25,8 @@ public class Reservation {
     @Column(name = "reservation_id")
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "member_id", nullable = false, foreignKey = @ForeignKey(name = "fk_reservation_member"))
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "member_id", nullable = true, foreignKey = @ForeignKey(name = "fk_reservation_member"))
     private Member member;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -45,14 +42,13 @@ public class Reservation {
 
     @Column(name = "reserved_at", nullable = false, updatable = false, columnDefinition = "timestamp(6)")
     @ColumnDefault("CURRENT_TIMESTAMP(6)")
-    private LocalDateTime reservedAt = LocalDateTime.now(ZoneId.of("Asia/Seoul")).truncatedTo(ChronoUnit.MICROS);
+    private LocalDateTime reservedAt = LocalDateTime.now();
 
     @Column(name = "cancelled_at", columnDefinition = "timestamp(6)")
     private LocalDateTime cancelledAt;
 
     @Builder
-    public Reservation(Member member, Screening screening) {
-        this.member = member;
+    public Reservation(Screening screening) {
         this.screening = screening;
     }
 
