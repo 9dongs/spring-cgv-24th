@@ -32,7 +32,11 @@ public enum ErrorCode {
 
     // 영화관 찜
     THEATER_FAVORITE_NOT_FOUND(HttpStatus.NOT_FOUND, "THEATER_FAVORITE404", "영화관 찜을 찾을 수 없습니다."),
-    THEATER_FAVORITE_ALREADY_EXISTS(HttpStatus.CONFLICT, "THEATER_FAVORITE409", "이미 찜한 영화관입니다.");
+    THEATER_FAVORITE_ALREADY_EXISTS(HttpStatus.CONFLICT, "THEATER_FAVORITE409", "이미 찜한 영화관입니다."),
+
+    // 영화 찜
+    MOVIE_FAVORITE_NOT_FOUND(HttpStatus.NOT_FOUND, "MOVIE_FAVORITE404", "영화 찜을 찾을 수 없습니다."),
+    MOVIE_FAVORITE_ALREADY_EXISTS(HttpStatus.CONFLICT, "MOVIE_FAVORITE409", "이미 찜한 영화입니다.");
     private final HttpStatus httpStatus;
     private final String code;
     private final String message;
