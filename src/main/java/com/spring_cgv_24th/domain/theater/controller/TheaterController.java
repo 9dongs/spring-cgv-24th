@@ -2,16 +2,14 @@ package com.spring_cgv_24th.domain.theater.controller;
 
 import com.spring_cgv_24th.domain.theater.dto.response.AuditoriumResDTO;
 import com.spring_cgv_24th.domain.theater.dto.response.TheaterResDTO;
+import com.spring_cgv_24th.domain.theater.dto.request.TheaterReqDTO;
 import com.spring_cgv_24th.domain.theater.service.TheaterService;
 import com.spring_cgv_24th.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @Tag(name = "Theater", description = "영화관 조회 API")
 @RestController
@@ -20,6 +18,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class TheaterController {
 
     private final TheaterService theaterService;
+
+    @Operation(summary = "영화관 등록")
+    @PostMapping
+    public ApiResponse<TheaterResDTO> createTheater(
+            @RequestBody TheaterReqDTO.CreateTheaterReqDTO request) {
+        return ApiResponse.onSuccess(theaterService.createTheater(request));
+    }
 
     @Operation(summary = "영화관 상세 조회")
     @GetMapping("/{theaterId}")

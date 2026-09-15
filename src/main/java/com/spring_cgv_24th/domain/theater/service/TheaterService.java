@@ -2,6 +2,7 @@ package com.spring_cgv_24th.domain.theater.service;
 
 import com.spring_cgv_24th.domain.theater.dto.response.AuditoriumResDTO;
 import com.spring_cgv_24th.domain.theater.dto.response.TheaterResDTO;
+import com.spring_cgv_24th.domain.theater.dto.request.TheaterReqDTO;
 import com.spring_cgv_24th.domain.theater.entity.Theater;
 import com.spring_cgv_24th.domain.theater.repository.AuditoriumRepository;
 import com.spring_cgv_24th.domain.theater.repository.TheaterRepository;
@@ -20,6 +21,15 @@ public class TheaterService {
 
     private final TheaterRepository theaterRepository;
     private final AuditoriumRepository auditoriumRepository;
+
+    @Transactional
+    public TheaterResDTO createTheater(TheaterReqDTO.CreateTheaterReqDTO request) {
+        Theater theater = Theater.builder()
+                .name(request.name())
+                .address(request.name())
+                .build();
+        return TheaterResDTO.from(theaterRepository.save(theater));
+    }
 
     public TheaterResDTO getTheater(Long theaterId) {
         Theater theater = theaterRepository.findById(theaterId)
