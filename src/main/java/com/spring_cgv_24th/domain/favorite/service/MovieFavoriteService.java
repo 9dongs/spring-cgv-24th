@@ -5,10 +5,12 @@ import com.spring_cgv_24th.domain.favorite.entity.MovieFavorite;
 import com.spring_cgv_24th.domain.favorite.repository.MovieFavoriteRepository;
 import com.spring_cgv_24th.domain.member.entity.Member;
 import com.spring_cgv_24th.domain.member.repository.MemberRepository;
+import com.spring_cgv_24th.domain.movie.dto.MovieResDTO;
 import com.spring_cgv_24th.domain.movie.entity.Movie;
 import com.spring_cgv_24th.domain.movie.repository.MovieRepository;
 import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,5 +51,14 @@ public class MovieFavoriteService {
         MovieFavorite favorite = movieFavoriteRepository.findByMember_IdAndMovie_Id(memberId, movieId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MOVIE_FAVORITE_NOT_FOUND));
         movieFavoriteRepository.delete(favorite);
+    }
+
+    public List<MovieResDTO> getFavorites(Long memberId) {
+        if (!memberRepository.existsById(memberId)) {
+            throw new CustomException(ErrorCode.MEMBER_NOT_FOUND);
+        }
+        return movieFavoriteRepository.findAllByMember_IdOrderByIdDesc(memberId).stream()
+                .map(favorite -> MovieResDTO.from(favorite.getMovie()))
+                .toList();
     }
 }
