@@ -1,6 +1,5 @@
 package com.spring_cgv_24th.domain.theater.controller;
 
-import com.spring_cgv_24th.domain.auditorium.dto.AuditoriumResDTO;
 import com.spring_cgv_24th.domain.theater.dto.TheaterResDTO;
 import com.spring_cgv_24th.domain.theater.dto.TheaterReqDTO;
 import com.spring_cgv_24th.domain.theater.service.TheaterService;
@@ -36,12 +35,5 @@ public class TheaterController {
     @GetMapping
     public ApiResponse<List<TheaterResDTO>> getTheaters() {
         return ApiResponse.onSuccess(theaterService.getTheaters());
-    }
-
-    @Operation(summary = "영화관별 상영관 조회")
-    @GetMapping("/{theaterId}/auditoriums")
-    public ApiResponse<List<AuditoriumResDTO>> getAuditoriums(
-            @PathVariable("theaterId") Long theaterId) {
-        return ApiResponse.onSuccess(theaterService.getAuditoriums(theaterId));
     }
 }
