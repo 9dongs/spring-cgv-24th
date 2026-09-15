@@ -1,4 +1,4 @@
-package com.spring_cgv_24th.domain.theater.enums;
+package com.spring_cgv_24th.domain.auditorium.enums;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;

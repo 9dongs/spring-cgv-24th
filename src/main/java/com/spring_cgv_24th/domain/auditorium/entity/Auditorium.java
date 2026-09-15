@@ -1,5 +1,6 @@
-package com.spring_cgv_24th.domain.theater.entity;
+package com.spring_cgv_24th.domain.auditorium.entity;
 
+import com.spring_cgv_24th.domain.theater.entity.Theater;
 import jakarta.persistence.*;
 
 import lombok.AccessLevel;

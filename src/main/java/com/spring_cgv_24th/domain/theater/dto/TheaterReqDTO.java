@@ -1,4 +1,4 @@
-package com.spring_cgv_24th.domain.theater.dto.request;
+package com.spring_cgv_24th.domain.theater.dto;
 
 import jakarta.validation.constraints.NotNull;
 

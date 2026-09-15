@@ -1,7 +1,7 @@
 package com.spring_cgv_24th.domain.screening.entity;
 
 import com.spring_cgv_24th.domain.movie.entity.Movie;
-import com.spring_cgv_24th.domain.theater.entity.Auditorium;
+import com.spring_cgv_24th.domain.auditorium.entity.Auditorium;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;

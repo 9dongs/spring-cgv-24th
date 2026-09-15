@@ -1,7 +1,7 @@
 package com.spring_cgv_24th.domain.screening.dto.response;
 
 import com.spring_cgv_24th.domain.screening.entity.Screening;
-import com.spring_cgv_24th.domain.theater.enums.AuditoriumKind;
+import com.spring_cgv_24th.domain.auditorium.enums.AuditoriumKind;
 import java.time.LocalDateTime;
 
 public record ScreeningResDTO(

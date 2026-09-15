@@ -1,8 +1,8 @@
 package com.spring_cgv_24th.domain.theater.controller;
 
-import com.spring_cgv_24th.domain.theater.dto.response.AuditoriumResDTO;
-import com.spring_cgv_24th.domain.theater.dto.response.TheaterResDTO;
-import com.spring_cgv_24th.domain.theater.dto.request.TheaterReqDTO;
+import com.spring_cgv_24th.domain.auditorium.dto.AuditoriumResDTO;
+import com.spring_cgv_24th.domain.theater.dto.TheaterResDTO;
+import com.spring_cgv_24th.domain.theater.dto.TheaterReqDTO;
 import com.spring_cgv_24th.domain.theater.service.TheaterService;
 import com.spring_cgv_24th.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;

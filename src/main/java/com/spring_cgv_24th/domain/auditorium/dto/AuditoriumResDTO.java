@@ -1,9 +1,9 @@
-package com.spring_cgv_24th.domain.theater.dto.response;
+package com.spring_cgv_24th.domain.auditorium.dto;
 
-import com.spring_cgv_24th.domain.theater.entity.Auditorium;
-import com.spring_cgv_24th.domain.theater.entity.AuditoriumType;
-import com.spring_cgv_24th.domain.theater.enums.AuditoriumCategory;
-import com.spring_cgv_24th.domain.theater.enums.AuditoriumKind;
+import com.spring_cgv_24th.domain.auditorium.entity.Auditorium;
+import com.spring_cgv_24th.domain.auditorium.entity.AuditoriumType;
+import com.spring_cgv_24th.domain.auditorium.enums.AuditoriumCategory;
+import com.spring_cgv_24th.domain.auditorium.enums.AuditoriumKind;
 
 public record AuditoriumResDTO(
         Long auditoriumId,
