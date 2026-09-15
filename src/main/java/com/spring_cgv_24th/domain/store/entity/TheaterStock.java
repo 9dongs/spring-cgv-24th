@@ -39,6 +39,9 @@ public class TheaterStock {
 
     @Builder
     public TheaterStock(Theater theater, Product product, int quantity) {
+        if (quantity < 1) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
         this.theater = theater;
         this.product = product;
         this.quantity = quantity;

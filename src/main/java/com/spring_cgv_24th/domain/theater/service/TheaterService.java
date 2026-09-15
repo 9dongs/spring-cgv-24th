@@ -4,6 +4,9 @@ import com.spring_cgv_24th.domain.theater.dto.TheaterResDTO;
 import com.spring_cgv_24th.domain.theater.dto.TheaterReqDTO;
 import com.spring_cgv_24th.domain.theater.entity.Theater;
 import com.spring_cgv_24th.domain.theater.repository.TheaterRepository;
+import com.spring_cgv_24th.domain.store.entity.TheaterStock;
+import com.spring_cgv_24th.domain.store.repository.ProductRepository;
+import com.spring_cgv_24th.domain.store.repository.TheaterStockRepository;
 import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
 import java.util.List;
@@ -18,6 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class TheaterService {
 
     private final TheaterRepository theaterRepository;
+    private final ProductRepository productRepository;
+    private final TheaterStockRepository theaterStockRepository;
 
     @Transactional
     public TheaterResDTO createTheater(TheaterReqDTO.CreateTheaterReqDTO request) {
@@ -25,7 +30,15 @@ public class TheaterService {
                 .name(request.name())
                 .address(request.name())
                 .build();
-        return TheaterResDTO.from(theaterRepository.save(theater));
+        Theater savedTheater = theaterRepository.save(theater);
+        theaterStockRepository.saveAll(productRepository.findAll(Sort.by("id")).stream()
+                .map(product -> TheaterStock.builder()
+                        .theater(savedTheater)
+                        .product(product)
+                        .quantity(1)
+                        .build())
+                .toList());
+        return TheaterResDTO.from(savedTheater);
     }
 
     public TheaterResDTO getTheater(Long theaterId) {
