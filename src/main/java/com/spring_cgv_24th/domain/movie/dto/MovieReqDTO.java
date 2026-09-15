@@ -1,4 +1,4 @@
-package com.spring_cgv_24th.domain.movie.dto.request;
+package com.spring_cgv_24th.domain.movie.dto;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;

@@ -1,7 +1,7 @@
 package com.spring_cgv_24th.domain.movie.controller;
 
-import com.spring_cgv_24th.domain.movie.dto.request.MovieReqDTO;
-import com.spring_cgv_24th.domain.movie.dto.response.MovieResDTO;
+import com.spring_cgv_24th.domain.movie.dto.MovieReqDTO;
+import com.spring_cgv_24th.domain.movie.dto.MovieResDTO;
 import com.spring_cgv_24th.domain.movie.service.MovieService;
 import com.spring_cgv_24th.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;

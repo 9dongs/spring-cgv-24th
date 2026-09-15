@@ -1,4 +1,4 @@
-package com.spring_cgv_24th.domain.movie.dto.response;
+package com.spring_cgv_24th.domain.movie.dto;
 
 import com.spring_cgv_24th.domain.movie.entity.Movie;
 import java.time.LocalDate;

@@ -1,7 +1,7 @@
 package com.spring_cgv_24th.domain.movie.service;
 
-import com.spring_cgv_24th.domain.movie.dto.request.MovieReqDTO;
-import com.spring_cgv_24th.domain.movie.dto.response.MovieResDTO;
+import com.spring_cgv_24th.domain.movie.dto.MovieReqDTO;
+import com.spring_cgv_24th.domain.movie.dto.MovieResDTO;
 import com.spring_cgv_24th.domain.movie.entity.Movie;
 import com.spring_cgv_24th.domain.movie.repository.MovieRepository;
 import com.spring_cgv_24th.global.exception.CustomException;
