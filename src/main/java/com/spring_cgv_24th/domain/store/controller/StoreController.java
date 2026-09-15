@@ -3,6 +3,7 @@ package com.spring_cgv_24th.domain.store.controller;
 import com.spring_cgv_24th.domain.store.dto.ProductResDTO;
 import com.spring_cgv_24th.domain.store.dto.StoreOrderReqDTO;
 import com.spring_cgv_24th.domain.store.dto.StoreOrderResDTO;
+import com.spring_cgv_24th.domain.store.dto.StoreStockReqDTO;
 import com.spring_cgv_24th.domain.store.dto.TheaterStockResDTO;
 import com.spring_cgv_24th.domain.store.service.StoreService;
 import com.spring_cgv_24th.global.response.ApiResponse;
@@ -14,6 +15,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -40,6 +42,15 @@ public class StoreController {
     public ApiResponse<List<TheaterStockResDTO>> getTheaterProducts(
             @Positive @PathVariable("theaterId") Long theaterId) {
         return ApiResponse.onSuccess(storeService.getTheaterProducts(theaterId));
+    }
+
+    @Operation(summary = "영화관별 매점 상품 재고 등록 및 보충")
+    @PatchMapping("/theaters/{theaterId}/store/products/{productId}/stock")
+    public ApiResponse<TheaterStockResDTO> updateStock(
+            @Positive @PathVariable("theaterId") Long theaterId,
+            @Positive @PathVariable("productId") Long productId,
+            @Valid @RequestBody StoreStockReqDTO request) {
+        return ApiResponse.onSuccess(storeService.updateStock(theaterId, productId, request));
     }
 
     @Operation(summary = "매점 구매")

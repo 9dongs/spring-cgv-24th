@@ -5,7 +5,9 @@ import com.spring_cgv_24th.domain.member.repository.MemberRepository;
 import com.spring_cgv_24th.domain.store.dto.ProductResDTO;
 import com.spring_cgv_24th.domain.store.dto.StoreOrderReqDTO;
 import com.spring_cgv_24th.domain.store.dto.StoreOrderResDTO;
+import com.spring_cgv_24th.domain.store.dto.StoreStockReqDTO;
 import com.spring_cgv_24th.domain.store.dto.TheaterStockResDTO;
+import com.spring_cgv_24th.domain.store.entity.Product;
 import com.spring_cgv_24th.domain.store.entity.StoreOrder;
 import com.spring_cgv_24th.domain.store.entity.StoreOrderItem;
 import com.spring_cgv_24th.domain.store.entity.TheaterStock;
@@ -51,13 +53,27 @@ public class StoreService {
             throw new CustomException(ErrorCode.THEATER_NOT_FOUND);
         }
 
+        List<Product> products = productRepository.findAll(Sort.by("id"));
         Map<Long, Integer> quantitiesByProductId = theaterStockRepository
                 .findAllByTheater_IdOrderByProduct_IdAsc(theaterId).stream()
                 .collect(Collectors.toMap(stock -> stock.getProduct().getId(), TheaterStock::getQuantity));
+        if (quantitiesByProductId.size() != products.size()
+                || quantitiesByProductId.values().stream().anyMatch(quantity -> quantity < 1)) {
+            throw new CustomException(ErrorCode.THEATER_STOCK_NOT_FOUND);
+        }
 
-        return productRepository.findAll(Sort.by("id")).stream()
+        return products.stream()
                 .map(product -> TheaterStockResDTO.from(product, quantitiesByProductId.get(product.getId())))
                 .toList();
+    }
+
+    @Transactional
+    public TheaterStockResDTO updateStock(Long theaterId, Long productId, StoreStockReqDTO request) {
+        TheaterStock stock = theaterStockRepository
+                .findByTheaterIdAndProductIdForUpdate(theaterId, productId)
+                .orElseThrow(() -> new CustomException(ErrorCode.THEATER_STOCK_NOT_FOUND));
+        stock.updateQuantity(request.quantity());
+        return TheaterStockResDTO.from(stock.getProduct(), theaterStockRepository.save(stock).getQuantity());
     }
 
     @Transactional

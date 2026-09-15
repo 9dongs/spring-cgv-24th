@@ -48,6 +48,14 @@ public class TheaterStock {
         this.updatedAt = LocalDateTime.now();
     }
 
+    public void updateQuantity(int quantity) {
+        if (quantity < 1) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+        this.quantity = quantity;
+        this.updatedAt = LocalDateTime.now();
+    }
+
     public void decreaseQuantity(int purchaseQuantity) {
         if (purchaseQuantity <= 0) {
             throw new CustomException(ErrorCode.BAD_REQUEST);

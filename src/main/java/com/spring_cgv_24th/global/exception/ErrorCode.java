@@ -39,6 +39,7 @@ public enum ErrorCode {
     MOVIE_FAVORITE_ALREADY_EXISTS(HttpStatus.CONFLICT, "MOVIE_FAVORITE409", "이미 찜한 영화입니다."),
 
     // 매점
+    PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "PRODUCT404", "매점 상품을 찾을 수 없습니다."),
     THEATER_STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "THEATER_STOCK404", "영화관의 상품 재고를 찾을 수 없습니다."),
     STORE_STOCK_INSUFFICIENT(HttpStatus.CONFLICT, "STORE_STOCK409", "구매 가능한 재고가 부족합니다.");
     private final HttpStatus httpStatus;
