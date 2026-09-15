@@ -5,9 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 
 @Slf4j
 @RestControllerAdvice
@@ -22,32 +24,22 @@ public class GlobalExceptionHandler {
     }
 
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiResponse<Void>> handleValidationException(MethodArgumentNotValidException e) {
-        String message = e.getBindingResult().getFieldErrors().stream()
-                .map(error -> error.getDefaultMessage())
-                .findFirst()
-                .orElse(ErrorCode.BAD_REQUEST.getMessage());
-        return ResponseEntity
-                .status(ErrorCode.BAD_REQUEST.getHttpStatus())
-                .body(ApiResponse.onFailure(ErrorCode.BAD_REQUEST.getCode(), message, null));
-    }
-
-
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<ApiResponse<Void>> handleTypeMismatchException(MethodArgumentTypeMismatchException e) {
+    // 서비스에 도달하기 전 Spring이 발견한 요청 형식/검증 오류만 공통 400으로 변환한다.
+    @ExceptionHandler({MethodArgumentNotValidException.class, MethodArgumentTypeMismatchException.class,
+            MissingServletRequestParameterException.class, HandlerMethodValidationException.class,
+            HttpMessageNotReadableException.class})
+    public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception e) {
         ErrorCode errorCode = ErrorCode.BAD_REQUEST;
+        String message = errorCode.getMessage();
+        if (e instanceof MethodArgumentNotValidException validationException) {
+            message = validationException.getBindingResult().getFieldErrors().stream()
+                    .map(error -> error.getDefaultMessage())
+                    .findFirst()
+                    .orElse(message);
+        }
         return ResponseEntity
                 .status(errorCode.getHttpStatus())
-                .body(ApiResponse.onFailure(errorCode.getCode(), errorCode.getMessage(), null));
-    }
-
-    @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<ApiResponse<Void>> handleUnreadableRequest(HttpMessageNotReadableException e) {
-        ErrorCode errorCode = ErrorCode.BAD_REQUEST;
-        return ResponseEntity
-                .status(errorCode.getHttpStatus())
-                .body(ApiResponse.onFailure(errorCode.getCode(), errorCode.getMessage(), null));
+                .body(ApiResponse.onFailure(errorCode.getCode(), message, null));
     }
 
     @ExceptionHandler(Exception.class)
