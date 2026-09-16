@@ -4,7 +4,7 @@ CEOS 24기 백엔드 스터디, CGV 클론 코딩 프로젝트
 ## 프로젝트 자료
 
 ![CGV 프로젝트 ERD](docs/spring-cgv-24th.png)
-- [DB 설계서 및 API 명세서 노션 페이지](https://app.notion.com/p/goodyintroduce/DB-3dbdfc0b63a180288a8ae1f2e593192c?source=copy_link)
+- [DB 설계서 및 API 명세서 노션 페이지](https://app.notion.com/p/goodyintroduce/CEOS-CGV-3dadfc0b63a180869fc9ff0364c5f5cc?source=copy_link)
 
 ---
 ## 세션 중간중간에 있었던 ❓ 질문에 답하기
