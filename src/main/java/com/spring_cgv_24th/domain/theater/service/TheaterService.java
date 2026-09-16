@@ -28,7 +28,7 @@ public class TheaterService {
     public TheaterResDTO createTheater(TheaterReqDTO.CreateTheaterReqDTO request) {
         Theater theater = Theater.builder()
                 .name(request.name())
-                .address(request.name())
+                .address(request.address())
                 .build();
         Theater savedTheater = theaterRepository.save(theater);
         theaterStockRepository.saveAll(productRepository.findAll(Sort.by("id")).stream()
