@@ -7,6 +7,7 @@ import com.spring_cgv_24th.domain.member.enums.MemberRole;
 import com.spring_cgv_24th.domain.member.repository.MemberRepository;
 import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
+import com.spring_cgv_24th.global.jwt.JwtProvider;
 import com.spring_cgv_24th.global.security.principal.CustomUserDetails;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -25,6 +26,7 @@ public class AuthService {
     private final MemberRepository memberRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
+    private final JwtProvider jwtProvider;
 
     @Transactional
     public AuthResDTO.SignUpResDTO signUp(AuthReqDTO.SignUpReqDTO request) {
@@ -48,7 +50,9 @@ public class AuthService {
                     UsernamePasswordAuthenticationToken.unauthenticated(
                             request.email(), request.password()));
             CustomUserDetails principal = (CustomUserDetails) authentication.getPrincipal();
-            return AuthResDTO.LoginResDTO.from(principal);
+            String accessToken = jwtProvider.createAccessToken(
+                    principal.getMemberId(), principal.getRole());
+            return AuthResDTO.LoginResDTO.from(accessToken);
         } catch (BadCredentialsException e) {
             throw new CustomException(ErrorCode.LOGIN_FAILED);
         }

@@ -33,6 +33,8 @@ public enum ErrorCode {
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "MEMBER404", "회원을 찾을 수 없습니다."),
     MEMBER_EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "MEMBER_EMAIL409", "이미 사용 중인 이메일입니다."),
     LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "AUTH401", "이메일 또는 비밀번호가 올바르지 않습니다."),
+    TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "TOKEN_EXPIRED", "토큰이 만료되었습니다."),
+    TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "TOKEN_INVALID", "유효하지 않은 토큰입니다."),
 
     // 예매
     SCREENING_SEAT_NOT_FOUND(HttpStatus.NOT_FOUND, "SEAT404", "해당 회차의 좌석을 찾을 수 없습니다."),

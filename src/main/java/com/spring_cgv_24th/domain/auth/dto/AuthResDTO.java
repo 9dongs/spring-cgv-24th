@@ -2,7 +2,6 @@ package com.spring_cgv_24th.domain.auth.dto;
 
 import com.spring_cgv_24th.domain.member.entity.Member;
 import com.spring_cgv_24th.domain.member.enums.MemberRole;
-import com.spring_cgv_24th.global.security.principal.CustomUserDetails;
 
 public class AuthResDTO {
 
@@ -25,15 +24,10 @@ public class AuthResDTO {
     }
 
     public record LoginResDTO(
-            Long memberId,
-            String email,
-            MemberRole role
+            String accessToken
     ) {
-        public static LoginResDTO from(CustomUserDetails userDetails) {
-            return new LoginResDTO(
-                    userDetails.getMemberId(),
-                    userDetails.getEmail(),
-                    userDetails.getRole());
+        public static LoginResDTO from(String accessToken) {
+            return new LoginResDTO(accessToken);
         }
     }
 }
