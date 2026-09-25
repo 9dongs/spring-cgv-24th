@@ -76,8 +76,8 @@ class ReservationServiceTest {
                 .thenReturn(Optional.of(seat));
 
         CustomException error = assertThrows(CustomException.class,
-                () -> reservationService.createReservation(
-                        new ReservationReqDTO.CreateReservationDTO(MEMBER_ID, 1L, List.of(2L))));
+                () -> reservationService.createReservation(MEMBER_ID,
+                        new ReservationReqDTO.CreateReservationDTO(1L, List.of(2L))));
 
         assertEquals(ErrorCode.SEAT_ALREADY_RESERVED, error.getErrorCode());
         assertSame(existing, seat.getReservation());
@@ -98,8 +98,8 @@ class ReservationServiceTest {
         when(reservationRepository.save(any(Reservation.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        var response = reservationService.createReservation(
-                new ReservationReqDTO.CreateReservationDTO(MEMBER_ID, 1L, List.of(2L)));
+        var response = reservationService.createReservation(MEMBER_ID,
+                new ReservationReqDTO.CreateReservationDTO(1L, List.of(2L)));
 
         assertNotNull(seat.getReservation());
         assertSame(member, seat.getReservation().getMember());
@@ -117,8 +117,8 @@ class ReservationServiceTest {
         when(memberRepository.findById(MEMBER_ID)).thenReturn(Optional.empty());
 
         CustomException error = assertThrows(CustomException.class,
-                () -> reservationService.createReservation(
-                        new ReservationReqDTO.CreateReservationDTO(MEMBER_ID, 1L, List.of(2L))));
+                () -> reservationService.createReservation(MEMBER_ID,
+                        new ReservationReqDTO.CreateReservationDTO(1L, List.of(2L))));
 
         assertEquals(ErrorCode.MEMBER_NOT_FOUND, error.getErrorCode());
         verifyNoInteractions(screeningSeatRepository, reservationRepository, reservationSeatRepository);
@@ -131,8 +131,8 @@ class ReservationServiceTest {
         when(screeningRepository.findById(1L)).thenReturn(Optional.of(screening));
 
         CustomException error = assertThrows(CustomException.class,
-                () -> reservationService.createReservation(
-                        new ReservationReqDTO.CreateReservationDTO(MEMBER_ID, 1L, List.of(2L))));
+                () -> reservationService.createReservation(MEMBER_ID,
+                        new ReservationReqDTO.CreateReservationDTO(1L, List.of(2L))));
 
         assertEquals(ErrorCode.SCREENING_ALREADY_STARTED, error.getErrorCode());
         verifyNoInteractions(screeningSeatRepository, reservationRepository, reservationSeatRepository);
@@ -145,8 +145,8 @@ class ReservationServiceTest {
         when(screeningRepository.findById(1L)).thenReturn(Optional.of(screening));
 
         CustomException error = assertThrows(CustomException.class,
-                () -> reservationService.createReservation(
-                        new ReservationReqDTO.CreateReservationDTO(MEMBER_ID, 1L, List.of(2L))));
+                () -> reservationService.createReservation(MEMBER_ID,
+                        new ReservationReqDTO.CreateReservationDTO(1L, List.of(2L))));
 
         assertEquals(ErrorCode.SCREENING_ALREADY_STARTED, error.getErrorCode());
         verifyNoInteractions(screeningSeatRepository, reservationRepository, reservationSeatRepository);
@@ -171,8 +171,8 @@ class ReservationServiceTest {
                 .thenReturn(Optional.of(seat));
 
         CustomException error = assertThrows(CustomException.class,
-                () -> service.createReservation(
-                        new ReservationReqDTO.CreateReservationDTO(MEMBER_ID, 1L, List.of(2L))));
+                () -> service.createReservation(MEMBER_ID,
+                        new ReservationReqDTO.CreateReservationDTO(1L, List.of(2L))));
 
         assertEquals(ErrorCode.SCREENING_ALREADY_STARTED, error.getErrorCode());
         assertNull(seat.getReservation());
@@ -223,8 +223,8 @@ class ReservationServiceTest {
             return rows;
         });
 
-        reservationService.createReservation(
-                new ReservationReqDTO.CreateReservationDTO(MEMBER_ID, 1L, List.of(2L)));
+        reservationService.createReservation(MEMBER_ID,
+                new ReservationReqDTO.CreateReservationDTO(1L, List.of(2L)));
         Reservation firstReservation = seat.getReservation();
         when(reservationRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(firstReservation));
@@ -241,8 +241,8 @@ class ReservationServiceTest {
         assertSame(seat, history.getFirst().getScreeningSeat());
         assertEquals(14_000, history.getFirst().getPrice());
 
-        reservationService.createReservation(
-                new ReservationReqDTO.CreateReservationDTO(MEMBER_ID, 1L, List.of(2L)));
+        reservationService.createReservation(MEMBER_ID,
+                new ReservationReqDTO.CreateReservationDTO(1L, List.of(2L)));
 
         assertNotSame(firstReservation, seat.getReservation());
         assertEquals(2, history.size());

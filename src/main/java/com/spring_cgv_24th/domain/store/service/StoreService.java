@@ -84,7 +84,7 @@ public class StoreService {
     }
 
     @Transactional
-    public StoreOrderResDTO createOrder(Long theaterId, StoreOrderReqDTO.CreateOrderDTO request) {
+    public StoreOrderResDTO createOrder(Long theaterId, Long memberId, StoreOrderReqDTO.CreateOrderDTO request) {
         List<Long> productIds = request.items().stream()
                 .map(StoreOrderReqDTO.OrderItemDTO::productId)
                 .toList();
@@ -92,8 +92,7 @@ public class StoreService {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
-        // 임시: 로그인 구현 후에는 요청의 memberId 대신 인증된 회원 ID를 사용할 예정.
-        Member member = memberRepository.findById(request.memberId())
+        Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
         Theater theater = theaterRepository.findById(theaterId)
                 .orElseThrow(() -> new CustomException(ErrorCode.THEATER_NOT_FOUND));

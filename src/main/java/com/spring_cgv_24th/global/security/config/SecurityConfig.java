@@ -38,6 +38,19 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/error")
                             .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/admin/check")
+                            .hasRole("ADMIN")
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/movies",
+                                "/api/theaters",
+                                "/api/theaters/*/auditoriums",
+                                "/api/screenings")
+                            .hasRole("ADMIN")
+                        .requestMatchers(
+                                HttpMethod.PATCH,
+                                "/api/theaters/*/store/products/*/stock")
+                            .hasRole("ADMIN")
                         .requestMatchers(
                                 HttpMethod.GET,
                                 "/api/movies/favorites",
