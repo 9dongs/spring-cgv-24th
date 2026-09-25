@@ -9,6 +9,7 @@ import com.spring_cgv_24th.domain.store.service.StoreService;
 import com.spring_cgv_24th.global.response.ApiResponse;
 import com.spring_cgv_24th.global.security.principal.CustomUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
@@ -47,6 +48,7 @@ public class StoreController {
     }
 
     @Operation(summary = "영화관별 매점 상품 재고 등록 및 보충")
+    @SecurityRequirement(name = "bearerAuth")
     @PatchMapping("/theaters/{theaterId}/store/products/{productId}/stock")
     public ApiResponse<TheaterStockResDTO> updateStock(
             @Positive @PathVariable("theaterId") Long theaterId,
@@ -56,6 +58,7 @@ public class StoreController {
     }
 
     @Operation(summary = "매점 구매")
+    @SecurityRequirement(name = "bearerAuth")
     @PostMapping("/theaters/{theaterId}/store/orders")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<StoreOrderResDTO> createOrder(
