@@ -2,6 +2,8 @@ package com.spring_cgv_24th.global.security.config;
 
 import com.spring_cgv_24th.global.jwt.JwtProvider;
 import com.spring_cgv_24th.global.security.filter.JwtAuthenticationFilter;
+import com.spring_cgv_24th.global.security.handler.CustomAccessDeniedHandler;
+import com.spring_cgv_24th.global.security.handler.CustomAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -23,13 +25,18 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
-            JwtProvider jwtProvider) throws Exception {
+            JwtProvider jwtProvider,
+            CustomAuthenticationEntryPoint authenticationEntryPoint,
+            CustomAccessDeniedHandler accessDeniedHandler) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(
                                 "/api/auth/**",
@@ -66,7 +73,7 @@ public class SecurityConfig {
                         .anyRequest()
                             .authenticated())
                 .addFilterBefore(
-                        new JwtAuthenticationFilter(jwtProvider),
+                        new JwtAuthenticationFilter(jwtProvider, authenticationEntryPoint),
                         UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
