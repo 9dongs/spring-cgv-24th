@@ -298,11 +298,14 @@ class ReservationServiceTest {
         assertNull(reservation.getCancelledAt());
     }
 
+    // 다른 회원이 취소를 시도해도 예매 상태와 좌석 점유가 그대로 유지된다.
     @Test
     void anotherMemberCannotCancelReservation() {
         Screening screening = mock(Screening.class);
         Reservation reservation = Reservation.builder().member(owner()).screening(screening)
                 .totalPrice(14_000).build();
+        ScreeningSeat seat = seat(screening);
+        seat.occupy(reservation);
         when(reservationRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(reservation));
 
         CustomException error = assertThrows(CustomException.class,
@@ -310,6 +313,8 @@ class ReservationServiceTest {
 
         assertEquals(ErrorCode.RESERVATION_FORBIDDEN, error.getErrorCode());
         assertEquals(ReservationStatus.CONFIRMED, reservation.getStatus());
+        assertNull(reservation.getCancelledAt());
+        assertSame(reservation, seat.getReservation());
         verifyNoInteractions(screeningSeatRepository);
     }
 
