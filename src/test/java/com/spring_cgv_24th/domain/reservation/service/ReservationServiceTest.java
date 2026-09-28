@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -68,7 +69,8 @@ class ReservationServiceTest {
         when(screening.getId()).thenReturn(1L);
         when(screening.getStartsAt()).thenReturn(NOW.plusHours(1));
         ScreeningSeat seat = seat(screening);
-        Reservation existing = Reservation.builder().screening(screening).totalPrice(14_000).build();
+        Reservation existing = Reservation.builder().member(mock(Member.class))
+                .screening(screening).totalPrice(14_000).build();
         seat.occupy(existing);
         when(screeningRepository.findById(1L)).thenReturn(Optional.of(screening));
         when(memberRepository.findById(MEMBER_ID)).thenReturn(Optional.of(mock(Member.class)));
@@ -318,17 +320,17 @@ class ReservationServiceTest {
         verifyNoInteractions(screeningSeatRepository);
     }
 
+    // 회원이 없는 이상 데이터가 조회되더라도 취소와 좌석 해제를 허용하지 않는다.
     @Test
     void reservationWithoutOwnerCannotBeCancelledByMemberId() {
-        Reservation reservation = Reservation.builder().screening(mock(Screening.class))
-                .totalPrice(14_000).build();
+        Reservation reservation = mock(Reservation.class);
         when(reservationRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(reservation));
 
         CustomException error = assertThrows(CustomException.class,
                 () -> reservationService.cancelReservation(1L, MEMBER_ID));
 
         assertEquals(ErrorCode.RESERVATION_FORBIDDEN, error.getErrorCode());
-        assertEquals(ReservationStatus.CONFIRMED, reservation.getStatus());
+        verify(reservation, never()).cancel(any());
         verifyNoInteractions(screeningSeatRepository);
     }
 
