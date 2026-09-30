@@ -3,6 +3,7 @@ package com.spring_cgv_24th.global.security.filter;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -270,6 +271,79 @@ class JwtAuthenticationFilterTest {
         authMvc(filter, authService).perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(new ObjectMapper().writeValueAsString(new AuthReqDTO.RefreshReqDTO(refreshToken))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.code").value("COMMON400"));
+
+        verifyNoInteractions(authService, jwtProvider, authenticationEntryPoint);
+    }
+
+    // 로그아웃도 본문으로 자격 증명을 전달하므로 Access 헤더 누락·만료와 무관하게 서비스로 진행한다.
+    @ParameterizedTest(name = "만료된 Access Token 헤더 포함: {0}")
+    @ValueSource(booleans = {false, true})
+    void logoutRequestUsesBodyTokenRegardlessOfExpiredAccessHeader(boolean includeExpiredAccessHeader)
+            throws Exception {
+        Instant now = Instant.parse("2026-09-30T06:00:00Z");
+        JwtProperties properties = new JwtProperties(
+                Encoders.BASE64.encode(Jwts.SIG.HS256.key().build().getEncoded()),
+                "spring-cgv-24th", "spring-cgv-api", Duration.ofMinutes(15), Duration.ofDays(7));
+        JwtProvider realProvider = new JwtProvider(properties, Clock.fixed(now, ZoneOffset.UTC));
+        JwtProvider oldIssuer = new JwtProvider(properties,
+                Clock.fixed(now.minus(Duration.ofMinutes(16)), ZoneOffset.UTC));
+        JwtAuthenticationFilter realFilter = new JwtAuthenticationFilter(realProvider, authenticationEntryPoint);
+        AuthService authService = mock(AuthService.class);
+        AuthReqDTO.LogoutReqDTO request = new AuthReqDTO.LogoutReqDTO(realProvider.createRefreshToken(1L));
+        MockHttpServletRequestBuilder apiRequest = post("/api/auth/logout")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(new ObjectMapper().writeValueAsString(request));
+        if (includeExpiredAccessHeader) {
+            apiRequest.header(HttpHeaders.AUTHORIZATION,
+                    "Bearer " + oldIssuer.createAccessToken(1L, MemberRole.USER));
+        }
+
+        authMvc(realFilter, authService).perform(apiRequest)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(authService).logout(request);
+        verifyNoInteractions(authenticationEntryPoint);
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    // Access 헤더 검사에서 제외해도 로그아웃 본문 토큰의 만료·무효 오류는 공통 JSON 401로 반환한다.
+    @ParameterizedTest
+    @EnumSource(value = ErrorCode.class, names = {"REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_INVALID"})
+    void logoutValidationFailureStillReturnsCommonJson(ErrorCode errorCode) throws Exception {
+        AuthService authService = mock(AuthService.class);
+        AuthReqDTO.LogoutReqDTO request = new AuthReqDTO.LogoutReqDTO("invalid-refresh-token");
+        doThrow(new CustomException(errorCode)).when(authService).logout(request);
+
+        authMvc(filter, authService).perform(post("/api/auth/logout")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer expired-access-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(new ObjectMapper().writeValueAsString(request)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.code").value(errorCode.getCode()))
+                .andExpect(jsonPath("$.message").value(errorCode.getMessage()))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(authService).logout(request);
+        verifyNoInteractions(jwtProvider, authenticationEntryPoint);
+    }
+
+    // 로그아웃의 Refresh Token 누락·공백 입력은 필수 값 검증으로 서비스 실행 전에 공통 400으로 거부한다.
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"", " ", "\t"})
+    void logoutRequestRequiresNonBlankBodyToken(String refreshToken) throws Exception {
+        AuthService authService = mock(AuthService.class);
+
+        authMvc(filter, authService).perform(post("/api/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(new ObjectMapper().writeValueAsString(new AuthReqDTO.LogoutReqDTO(refreshToken))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.code").value("COMMON400"));

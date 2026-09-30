@@ -1,12 +1,15 @@
 package com.spring_cgv_24th.domain.auth.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -235,6 +238,58 @@ class AuthServiceTest {
         verifyNoInteractions(jwtProvider, memberRepository, authenticationManager, passwordEncoder);
     }
 
+    // 로그아웃은 Refresh 해시를 삭제해 재발급을 막지만 Access는 유지하고, 같은 미만료 토큰의 반복 요청은 허용한다.
+    @Test
+    void logoutRevokesRefreshTokenButKeepsAccessTokenAndAllowsRepeatedLogout() {
+        LogoutFixture fixture = logoutFixture();
+        String accessToken = fixture.provider().createAccessToken(7L, MemberRole.USER);
+        String refreshToken = fixture.provider().createRefreshToken(7L);
+        fixture.member().replaceRefreshToken(fixture.hasher().hash(refreshToken));
+        AuthReqDTO.LogoutReqDTO request = new AuthReqDTO.LogoutReqDTO(refreshToken);
+
+        fixture.service().logout(request);
+
+        assertNull(fixture.member().getRefreshTokenHash());
+        CustomException error = assertThrows(CustomException.class,
+                () -> fixture.service().refresh(new AuthReqDTO.RefreshReqDTO(refreshToken)));
+        assertEquals(ErrorCode.REFRESH_TOKEN_INVALID, error.getErrorCode());
+        assertDoesNotThrow(() -> fixture.service().logout(request));
+        assertEquals(7L, fixture.provider().parseAccessToken(accessToken).memberId());
+        verifyNoInteractions(authenticationManager, passwordEncoder);
+    }
+
+    // 이전 로그인 토큰으로 로그아웃을 시도해도 최신 토큰의 해시는 유지되고 재발급에도 사용할 수 있다.
+    @Test
+    void logoutWithPreviousRefreshTokenDoesNotRevokeLatestToken() {
+        LogoutFixture fixture = logoutFixture();
+        String previousToken = fixture.provider().createRefreshToken(7L);
+        String latestToken = fixture.provider().createRefreshToken(7L);
+        String latestHash = fixture.hasher().hash(latestToken);
+        fixture.member().replaceRefreshToken(latestHash);
+
+        CustomException error = assertThrows(CustomException.class,
+                () -> fixture.service().logout(new AuthReqDTO.LogoutReqDTO(previousToken)));
+
+        assertEquals(ErrorCode.REFRESH_TOKEN_INVALID, error.getErrorCode());
+        assertEquals(latestHash, fixture.member().getRefreshTokenHash());
+        AuthResDTO.RefreshResDTO response = fixture.service().refresh(new AuthReqDTO.RefreshReqDTO(latestToken));
+        assertEquals(7L, fixture.provider().parseAccessToken(response.accessToken()).memberId());
+        verifyNoInteractions(authenticationManager, passwordEncoder);
+    }
+
+    // 만료되거나 유효하지 않은 Refresh Token의 폐기 오류는 그대로 전달하고 다른 인증 처리는 실행하지 않는다.
+    @ParameterizedTest
+    @EnumSource(value = ErrorCode.class, names = {"REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_INVALID"})
+    void invalidLogoutTokenPropagatesRevocationFailure(ErrorCode errorCode) {
+        doThrow(new CustomException(errorCode)).when(refreshTokenService).revoke("invalid-refresh-token");
+
+        CustomException error = assertThrows(CustomException.class,
+                () -> authService.logout(new AuthReqDTO.LogoutReqDTO("invalid-refresh-token")));
+
+        assertEquals(errorCode, error.getErrorCode());
+        verifyNoInteractions(jwtProvider, memberRepository, authenticationManager, passwordEncoder);
+    }
+
     // 인증 실패는 LOGIN_FAILED로 변환하고 두 토큰 모두 발급하지 않아 기존 해시도 변경하지 않는다.
     @Test
     void badCredentialsReturnLoginFailedWithoutIssuingToken() {
@@ -246,5 +301,32 @@ class AuthServiceTest {
 
         assertEquals(ErrorCode.LOGIN_FAILED, error.getErrorCode());
         verifyNoInteractions(jwtProvider, refreshTokenService, memberRepository, passwordEncoder);
+    }
+
+    private LogoutFixture logoutFixture() {
+        Clock clock = Clock.fixed(Instant.parse("2026-09-30T06:00:00Z"), ZoneOffset.UTC);
+        JwtProperties properties = new JwtProperties(
+                Encoders.BASE64.encode(Jwts.SIG.HS256.key().build().getEncoded()),
+                "spring-cgv-24th", "spring-cgv-api", Duration.ofMinutes(15), Duration.ofDays(7));
+        JwtProvider realProvider = new JwtProvider(properties, clock);
+        RefreshTokenHasher hasher = new RefreshTokenHasher();
+        RefreshTokenService realRefreshService = new RefreshTokenService(
+                memberRepository, realProvider, hasher, clock);
+        AuthService service = new AuthService(
+                memberRepository, passwordEncoder, authenticationManager, realProvider, realRefreshService);
+        Member member = Member.builder()
+                .email(EMAIL)
+                .name("테스트 회원")
+                .passwordHash("encoded-password")
+                .role(MemberRole.USER)
+                .build();
+        ReflectionTestUtils.setField(member, "id", 7L);
+        when(memberRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(member));
+        return new LogoutFixture(service, realProvider, member, hasher);
+    }
+
+    private record LogoutFixture(
+            AuthService service, JwtProvider provider, Member member, RefreshTokenHasher hasher
+    ) {
     }
 }

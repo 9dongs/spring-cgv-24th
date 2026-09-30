@@ -29,7 +29,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final Set<String> EXCLUDED_PATHS = Set.of(
             "/api/auth/login",
             "/api/auth/signup",
-            "/api/auth/refresh");
+            "/api/auth/refresh",
+            "/api/auth/logout");
 
     private final JwtProvider jwtProvider;
     private final AuthenticationEntryPoint authenticationEntryPoint;

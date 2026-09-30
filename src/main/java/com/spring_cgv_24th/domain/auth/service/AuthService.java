@@ -68,4 +68,9 @@ public class AuthService {
         String accessToken = jwtProvider.createAccessToken(member.getId(), member.getRole());
         return AuthResDTO.RefreshResDTO.from(accessToken);
     }
+
+    @Transactional
+    public void logout(AuthReqDTO.LogoutReqDTO request) {
+        refreshTokenService.revoke(request.refreshToken());
+    }
 }

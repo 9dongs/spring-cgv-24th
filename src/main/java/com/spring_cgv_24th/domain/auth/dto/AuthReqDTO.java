@@ -50,4 +50,10 @@ public class AuthReqDTO {
             String refreshToken
     ) {
     }
+
+    public record LogoutReqDTO(
+            @NotBlank(message = "Refresh Token은 필수입니다.")
+            String refreshToken
+    ) {
+    }
 }
