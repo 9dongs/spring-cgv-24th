@@ -11,9 +11,14 @@ import com.spring_cgv_24th.domain.member.enums.MemberRole;
 import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
 import com.spring_cgv_24th.global.jwt.AccessTokenClaims;
+import com.spring_cgv_24th.global.jwt.JwtProperties;
 import com.spring_cgv_24th.global.jwt.JwtProvider;
 import com.spring_cgv_24th.global.security.principal.CustomUserDetails;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.io.Encoders;
 import jakarta.servlet.FilterChain;
+import java.time.Clock;
+import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -86,6 +91,28 @@ class JwtAuthenticationFilterTest {
                 .extracting("authority")
                 .containsExactly("ROLE_USER");
         verify(filterChain).doFilter(request, response);
+    }
+
+    // 실제로 발급한 Refresh JWT를 일반 보호 API에 보내도 인증을 만들지 않고 실패 처리한다.
+    @Test
+    @DisplayName("Refresh Token으로 보호 API에 접근하면 인증 실패로 처리한다")
+    void rejectsRealRefreshTokenOnProtectedApi() throws Exception {
+        JwtProperties properties = new JwtProperties(
+                Encoders.BASE64.encode(Jwts.SIG.HS256.key().build().getEncoded()),
+                "spring-cgv-24th", "spring-cgv-api", Duration.ofMinutes(15), Duration.ofDays(7));
+        JwtProvider realProvider = new JwtProvider(properties, Clock.systemUTC());
+        JwtAuthenticationFilter realFilter = new JwtAuthenticationFilter(realProvider, authenticationEntryPoint);
+        MockHttpServletRequest request = request("/api/reservations");
+        request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer " + realProvider.createRefreshToken(1L));
+
+        realFilter.doFilter(request, response, filterChain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        assertThat(request.getAttribute(JwtAuthenticationFilter.AUTH_ERROR_ATTRIBUTE))
+                .isEqualTo(ErrorCode.TOKEN_INVALID);
+        verify(authenticationEntryPoint).commence(
+                eq(request), eq(response), any(AuthenticationException.class));
+        verifyNoInteractions(filterChain);
     }
 
     // 만료된 토큰은 실패 원인을 보관하고 EntryPoint에서 응답한 뒤 체인을 멈춘다.

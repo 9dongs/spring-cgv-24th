@@ -8,6 +8,7 @@ import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Encoders;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
@@ -31,8 +32,9 @@ class JwtProviderTest {
                 Encoders.BASE64.encode(signingKey.getEncoded()),
                 ISSUER,
                 AUDIENCE,
-                Duration.ofMinutes(15));
-        jwtProvider = new JwtProvider(properties);
+                Duration.ofMinutes(15),
+                Duration.ofDays(7));
+        jwtProvider = new JwtProvider(properties, Clock.systemUTC());
     }
 
     // 발급한 Access Token에서 회원 ID와 USER 역할을 다시 읽을 수 있다.

@@ -13,8 +13,10 @@ import io.jsonwebtoken.io.DecodingException;
 import io.jsonwebtoken.security.Keys;
 import io.jsonwebtoken.security.MacAlgorithm;
 import io.jsonwebtoken.security.WeakKeyException;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Date;
+import java.util.UUID;
 import javax.crypto.SecretKey;
 import org.springframework.stereotype.Component;
 
@@ -25,28 +27,24 @@ public class JwtProvider {
     private static final String ROLE_CLAIM = "role";
     private static final String TOKEN_TYPE_CLAIM = "tokenType";
     private static final String ACCESS_TOKEN_TYPE = "ACCESS";
+    private static final String REFRESH_TOKEN_TYPE = "REFRESH";
 
     private final JwtProperties properties;
     private final SecretKey signingKey;
-    private final JwtParser jwtParser;
+    private final Clock clock;
+    private final JwtParser accessTokenParser;
+    private final JwtParser refreshTokenParser;
 
-    public JwtProvider(JwtProperties properties) {
+    public JwtProvider(JwtProperties properties, Clock clock) {
         this.properties = properties;
+        this.clock = clock;
         this.signingKey = createSigningKey(properties.secret());
-        this.jwtParser = Jwts.parser()
-                .verifyWith(signingKey)
-                .requireIssuer(properties.issuer())
-                .requireAudience(properties.audience())
-                .require(TOKEN_TYPE_CLAIM, ACCESS_TOKEN_TYPE)
-                .sig()
-                    .clear()
-                    .add(SIGNATURE_ALGORITHM)
-                    .and()
-                .build();
+        this.accessTokenParser = createParser(ACCESS_TOKEN_TYPE);
+        this.refreshTokenParser = createParser(REFRESH_TOKEN_TYPE);
     }
 
     public String createAccessToken(Long memberId, MemberRole role) {
-        Instant issuedAt = Instant.now();
+        Instant issuedAt = clock.instant();
         Instant expiresAt = issuedAt.plus(properties.accessTokenExpiration());
 
         return Jwts.builder()
@@ -61,15 +59,77 @@ public class JwtProvider {
                 .compact();
     }
 
+    public String createRefreshToken(Long memberId) {
+        if (memberId == null || memberId <= 0) {
+            throw new IllegalArgumentException("회원 ID가 올바르지 않습니다.");
+        }
+        Instant issuedAt = clock.instant();
+        Instant expiresAt = issuedAt.plus(properties.refreshTokenExpiration());
+
+        // 같은 회원에게 같은 초에 발급해도 서로 다른 토큰이 되도록 고유 ID를 넣는다.
+        return Jwts.builder()
+                .issuer(properties.issuer())
+                .audience().add(properties.audience()).and()
+                .subject(memberId.toString())
+                .id(UUID.randomUUID().toString())
+                .issuedAt(Date.from(issuedAt))
+                .expiration(Date.from(expiresAt))
+                .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN_TYPE)
+                .signWith(signingKey, SIGNATURE_ALGORITHM)
+                .compact();
+    }
+
     public AccessTokenClaims parseAccessToken(String token) {
         try {
-            Claims claims = jwtParser.parseSignedClaims(token).getPayload();
+            Claims claims = accessTokenParser.parseSignedClaims(token).getPayload();
             return toAccessTokenClaims(claims);
         } catch (ExpiredJwtException e) {
             throw new CustomException(ErrorCode.TOKEN_EXPIRED);
         } catch (JwtException | IllegalArgumentException e) {
             throw new CustomException(ErrorCode.TOKEN_INVALID);
         }
+    }
+
+    public RefreshTokenClaims parseRefreshToken(String token) {
+        try {
+            Claims claims = refreshTokenParser.parseSignedClaims(token).getPayload();
+            if (claims.getExpiration() == null || claims.getIssuedAt() == null
+                    || claims.getId() == null || claims.getId().isBlank()) {
+                throw new IllegalArgumentException("필수 Refresh Token Claim이 없습니다.");
+            }
+            Instant issuedAt = claims.getIssuedAt().toInstant();
+            Instant expiresAt = claims.getExpiration().toInstant();
+            if (issuedAt.isAfter(clock.instant()) || !expiresAt.isAfter(issuedAt)) {
+                throw new IllegalArgumentException("Refresh Token 시간 Claim이 올바르지 않습니다.");
+            }
+            // JWT 만료 시각과 현재 시각이 정확히 같아도 이미 만료된 것으로 처리한다.
+            if (!expiresAt.isAfter(clock.instant())) {
+                throw new CustomException(ErrorCode.REFRESH_TOKEN_EXPIRED);
+            }
+            Long memberId = Long.valueOf(claims.getSubject());
+            if (memberId <= 0) {
+                throw new IllegalArgumentException("회원 ID가 올바르지 않습니다.");
+            }
+            return new RefreshTokenClaims(memberId, expiresAt);
+        } catch (ExpiredJwtException e) {
+            throw new CustomException(ErrorCode.REFRESH_TOKEN_EXPIRED);
+        } catch (JwtException | IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.REFRESH_TOKEN_INVALID);
+        }
+    }
+
+    private JwtParser createParser(String tokenType) {
+        return Jwts.parser()
+                .verifyWith(signingKey)
+                .clock(() -> Date.from(clock.instant()))
+                .requireIssuer(properties.issuer())
+                .requireAudience(properties.audience())
+                .require(TOKEN_TYPE_CLAIM, tokenType)
+                .sig()
+                    .clear()
+                    .add(SIGNATURE_ALGORITHM)
+                    .and()
+                .build();
     }
 
     private AccessTokenClaims toAccessTokenClaims(Claims claims) {

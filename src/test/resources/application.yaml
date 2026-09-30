@@ -11,6 +11,8 @@ spring:
     properties:
       hibernate:
         format_sql: true
+jwt:
+  refresh-token-expiration: 7d
 logging:
   level:
     org.hibernate.SQL: debug

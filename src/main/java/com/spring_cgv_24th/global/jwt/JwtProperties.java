@@ -13,11 +13,17 @@ public record JwtProperties(
         @NotBlank String secret,
         @NotBlank String issuer,
         @NotBlank String audience,
-        @NotNull Duration accessTokenExpiration
+        @NotNull Duration accessTokenExpiration,
+        @NotNull Duration refreshTokenExpiration
 ) {
 
     @AssertTrue(message = "Access Token 만료 시간은 0보다 커야 합니다.")
     public boolean isAccessTokenExpirationValid() {
         return accessTokenExpiration != null && accessTokenExpiration.isPositive();
+    }
+
+    @AssertTrue(message = "Refresh Token 만료 시간은 0보다 커야 합니다.")
+    public boolean isRefreshTokenExpirationValid() {
+        return refreshTokenExpiration != null && refreshTokenExpiration.isPositive();
     }
 }
