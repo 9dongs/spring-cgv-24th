@@ -24,6 +24,8 @@ import com.spring_cgv_24th.global.exception.GlobalExceptionHandler;
 import com.spring_cgv_24th.global.jwt.AccessTokenClaims;
 import com.spring_cgv_24th.global.jwt.JwtProperties;
 import com.spring_cgv_24th.global.jwt.JwtProvider;
+import com.spring_cgv_24th.global.security.handler.CustomAccessDeniedHandler;
+import com.spring_cgv_24th.global.security.handler.CustomAuthenticationEntryPoint;
 import com.spring_cgv_24th.global.security.principal.CustomUserDetails;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Encoders;
@@ -38,7 +40,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
@@ -47,6 +49,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -54,6 +58,7 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.servlet.HandlerExceptionResolver;
 
 @ExtendWith(MockitoExtension.class)
 class JwtAuthenticationFilterTest {
@@ -189,6 +194,48 @@ class JwtAuthenticationFilterTest {
         verifyNoInteractions(filterChain);
     }
 
+    // 실제 EntryPoint와 공통 예외 처리기를 연결해 토큰 오류의 JSON 코드와 401 상태를 검증한다.
+    @ParameterizedTest
+    @CsvSource({
+            "TOKEN_NOT_EXIST, TOKEN_NOT_EXIST401",
+            "TOKEN_EXPIRED, TOKEN_EXPIRED401",
+            "TOKEN_INVALID, TOKEN_INVALID401"
+    })
+    void authenticationFailureReturnsStatusSuffixedCode(ErrorCode errorCode, String expectedCode)
+            throws Exception {
+        MockHttpServletRequest request = request("/api/reservations");
+        if (errorCode != ErrorCode.TOKEN_NOT_EXIST) {
+            request.setAttribute(JwtAuthenticationFilter.AUTH_ERROR_ATTRIBUTE, errorCode);
+        }
+        CustomAuthenticationEntryPoint entryPoint = new CustomAuthenticationEntryPoint(exceptionResolver());
+
+        entryPoint.commence(request, response, new InsufficientAuthenticationException("인증이 필요합니다."));
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentType()).startsWith(MediaType.APPLICATION_JSON_VALUE);
+        var json = new ObjectMapper().readTree(response.getContentAsString());
+        assertThat(json.path("success").asBoolean()).isFalse();
+        assertThat(json.path("code").asText()).isEqualTo(expectedCode);
+        assertThat(json.path("message").asText()).isEqualTo(errorCode.getMessage());
+        assertThat(json.has("data")).isFalse();
+    }
+
+    // 실제 권한 거부 핸들러도 상태·메시지를 유지하며 ACCESS_DENIED403을 공통 JSON에 담는다.
+    @Test
+    void accessDeniedReturnsStatusSuffixedCode() throws Exception {
+        CustomAccessDeniedHandler deniedHandler = new CustomAccessDeniedHandler(exceptionResolver());
+
+        deniedHandler.handle(request("/api/admin/check"), response, new AccessDeniedException("권한이 없습니다."));
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        assertThat(response.getContentType()).startsWith(MediaType.APPLICATION_JSON_VALUE);
+        var json = new ObjectMapper().readTree(response.getContentAsString());
+        assertThat(json.path("success").asBoolean()).isFalse();
+        assertThat(json.path("code").asText()).isEqualTo("ACCESS_DENIED403");
+        assertThat(json.path("message").asText()).isEqualTo(ErrorCode.ACCESS_DENIED.getMessage());
+        assertThat(json.has("data")).isFalse();
+    }
+
     // 로그인은 JWT 필터의 검사 대상에서 제외되어 헤더와 무관하게 다음 필터로 간다.
     @Test
     @DisplayName("로그인 경로에서는 JWT 필터를 실행하지 않는다")
@@ -241,8 +288,11 @@ class JwtAuthenticationFilterTest {
 
     // Access 헤더 검사를 생략해도 본문 Refresh Token의 검증 실패는 공통 JSON 401로 반환한다.
     @ParameterizedTest
-    @EnumSource(value = ErrorCode.class, names = {"REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_INVALID"})
-    void refreshValidationFailureStillReturnsCommonJson(ErrorCode errorCode) throws Exception {
+    @CsvSource({
+            "REFRESH_TOKEN_EXPIRED, REFRESH_TOKEN_EXPIRED401",
+            "REFRESH_TOKEN_INVALID, REFRESH_TOKEN_INVALID401"
+    })
+    void refreshValidationFailureStillReturnsCommonJson(ErrorCode errorCode, String expectedCode) throws Exception {
         AuthService authService = mock(AuthService.class);
         AuthReqDTO.RefreshReqDTO request = new AuthReqDTO.RefreshReqDTO("invalid-refresh-token");
         when(authService.refresh(request)).thenThrow(new CustomException(errorCode));
@@ -253,7 +303,7 @@ class JwtAuthenticationFilterTest {
                         .content(new ObjectMapper().writeValueAsString(request)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value(errorCode.getCode()))
+                .andExpect(jsonPath("$.code").value(expectedCode))
                 .andExpect(jsonPath("$.message").value(errorCode.getMessage()))
                 .andExpect(jsonPath("$.data").doesNotExist());
 
@@ -314,8 +364,11 @@ class JwtAuthenticationFilterTest {
 
     // Access 헤더 검사에서 제외해도 로그아웃 본문 토큰의 만료·무효 오류는 공통 JSON 401로 반환한다.
     @ParameterizedTest
-    @EnumSource(value = ErrorCode.class, names = {"REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_INVALID"})
-    void logoutValidationFailureStillReturnsCommonJson(ErrorCode errorCode) throws Exception {
+    @CsvSource({
+            "REFRESH_TOKEN_EXPIRED, REFRESH_TOKEN_EXPIRED401",
+            "REFRESH_TOKEN_INVALID, REFRESH_TOKEN_INVALID401"
+    })
+    void logoutValidationFailureStillReturnsCommonJson(ErrorCode errorCode, String expectedCode) throws Exception {
         AuthService authService = mock(AuthService.class);
         AuthReqDTO.LogoutReqDTO request = new AuthReqDTO.LogoutReqDTO("invalid-refresh-token");
         doThrow(new CustomException(errorCode)).when(authService).logout(request);
@@ -326,7 +379,7 @@ class JwtAuthenticationFilterTest {
                         .content(new ObjectMapper().writeValueAsString(request)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.code").value(errorCode.getCode()))
+                .andExpect(jsonPath("$.code").value(expectedCode))
                 .andExpect(jsonPath("$.message").value(errorCode.getMessage()))
                 .andExpect(jsonPath("$.data").doesNotExist());
 
@@ -349,6 +402,11 @@ class JwtAuthenticationFilterTest {
                 .andExpect(jsonPath("$.code").value("COMMON400"));
 
         verifyNoInteractions(authService, jwtProvider, authenticationEntryPoint);
+    }
+
+    private HandlerExceptionResolver exceptionResolver() {
+        return authMvc(filter, mock(AuthService.class)).getDispatcherServlet()
+                .getWebApplicationContext().getBean("handlerExceptionResolver", HandlerExceptionResolver.class);
     }
 
     private MockMvc authMvc(JwtAuthenticationFilter requestFilter, AuthService authService) {

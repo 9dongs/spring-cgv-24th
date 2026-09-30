@@ -314,11 +314,16 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | HTTP 상태 | 코드 | 의미                                |
 | --- | --- |-----------------------------------|
 | `400` | `COMMON400` | 요청 형식 또는 검증 실패                    |
-| `401` | `TOKEN_NOT_EXIST` | Access Token이 없음                  |
-| `401` | `TOKEN_EXPIRED` | Access Token이 만료됨                 |
-| `401` | `TOKEN_INVALID` | Access Token 형식/서명/Claim이 올바르지 않음 |
-| `403` | `ACCESS_DENIED` | 필요한 권한이 없음                        |
+| `401` | `TOKEN_NOT_EXIST401` | Access Token이 없음                  |
+| `401` | `TOKEN_EXPIRED401` | Access Token이 만료됨                 |
+| `401` | `TOKEN_INVALID401` | Access Token 형식/서명/Claim이 올바르지 않음 |
+| `401` | `REFRESH_TOKEN_EXPIRED401` | Refresh Token이 만료됨 |
+| `401` | `REFRESH_TOKEN_INVALID401` | Refresh Token 형식/서명/Claim이 올바르지 않거나 저장된 토큰과 일치하지 않음 |
+| `403` | `ACCESS_DENIED403` | 필요한 권한이 없음                        |
 | `500` | `COMMON500` | 처리되지 않은 서버 오류                     |
+
+오류 응답의 `code`는 오류 식별자 뒤에 HTTP 상태 번호를 붙이는 형식으로 통일한다.
+기존 `TOKEN_EXPIRED` 등의 응답 코드를 사용하는 클라이언트는 변경된 값을 기준으로 오류 분기를 수정해야 한다.
 
 ### API 목록
 
@@ -1489,14 +1494,20 @@ Swagger의 보호 API에는 `bearerAuth` 요구사항을 표시했다.
 
 | 상황 | HTTP 상태 | 코드 |
 | --- | --- | --- |
-| 보호 API에 토큰 없음 | `401` | `TOKEN_NOT_EXIST` |
-| 토큰 만료 | `401` | `TOKEN_EXPIRED` |
-| 형식 오류·변조·잘못된 서명 | `401` | `TOKEN_INVALID` |
-| 인증은 됐지만 권한 부족 | `403` | `ACCESS_DENIED` |
+| 보호 API에 토큰 없음 | `401` | `TOKEN_NOT_EXIST401` |
+| 토큰 만료 | `401` | `TOKEN_EXPIRED401` |
+| 형식 오류·변조·잘못된 서명 | `401` | `TOKEN_INVALID401` |
+| Refresh Token 만료 | `401` | `REFRESH_TOKEN_EXPIRED401` |
+| Refresh Token 검증 실패·저장된 토큰 불일치 | `401` | `REFRESH_TOKEN_INVALID401` |
+| 인증은 됐지만 권한 부족 | `403` | `ACCESS_DENIED403` |
 
 ### 테스트 기록
 
 `AuthenticationFlowIntegrationTest`는 MockMvc 요청으로 다음 결과를 확인했다.
+
+아래 통합 테스트 결과는 기존 실행 기록이며, 오류 코드 표기는 코드리뷰 반영 후의 현재 형식으로 갱신했다.
+이번 오류 코드 변경에서는 통합 테스트를 다시 실행하지 않고, `JwtAuthenticationFilterTest`에서 실제 인증/인가 핸들러와 공통 예외 처리기를 연결한 응답 및 재발급·로그아웃 오류 응답의 6개 코드를 DB 없이 검증했다.
+HTTP 상태와 오류 메시지는 기존 값을 유지한다.
 
 `JwtProviderTest`, `JwtAuthenticationFilterTest`, `AuthServiceTest`와 기존 도메인 서비스 테스트는 각 단위의 정상/실패 경로를 검증한다.
 
@@ -1506,13 +1517,13 @@ Swagger의 보호 API에는 `bearerAuth` 요구사항을 표시했다.
 | 없는 계정 / 잘못된 비밀번호 | 모두 `401 AUTH401`, 응답 본문 동일, 토큰 미발급 확인         |
 | 토큰 없이 공개 API 호출 | `200` 확인                                      |
 | 정상 토큰으로 보호된 API 호출 | `200` 확인                                      |
-| 토큰 없이 보호된 API 호출 | `401 TOKEN_NOT_EXIST`와 공통 JSON 확인             |
-| 만료된 토큰으로 보호된 API 호출 | `401 TOKEN_EXPIRED`와 공통 JSON 확인               |
-| 변조된 토큰으로 보호된 API 호출 | `401 TOKEN_INVALID`와 공통 JSON 확인               |
-| 다른 키로 서명한 토큰 | `401 TOKEN_INVALID`와 공통 JSON 확인               |
-| 일반 사용자로 관리자 API 호출 | `403 ACCESS_DENIED`와 공통 JSON 확인               |
+| 토큰 없이 보호된 API 호출 | `401 TOKEN_NOT_EXIST401`와 공통 JSON 확인             |
+| 만료된 토큰으로 보호된 API 호출 | `401 TOKEN_EXPIRED401`와 공통 JSON 확인               |
+| 변조된 토큰으로 보호된 API 호출 | `401 TOKEN_INVALID401`와 공통 JSON 확인               |
+| 다른 키로 서명한 토큰 | `401 TOKEN_INVALID401`와 공통 JSON 확인               |
+| 일반 사용자로 관리자 API 호출 | `403 ACCESS_DENIED403`와 공통 JSON 확인               |
 | 관리자로 관리자 API 호출 | `200` 확인                                      |
-| 정상 인증 요청 직후, 토큰 없이 보호된 API 호출 | `401 TOKEN_NOT_EXIST` 확인 — 이전 요청의 인증이 유지되지 않음 |
+| 정상 인증 요청 직후, 토큰 없이 보호된 API 호출 | `401 TOKEN_NOT_EXIST401` 확인 — 이전 요청의 인증이 유지되지 않음 |
 
 소유권 검사에서는 다른 회원의 찜 삭제가 `404`로 거부되고 기존 찜이 유지되며, 타인의 찜 목록이 조회되지 않는 것을 확인했다. 
 

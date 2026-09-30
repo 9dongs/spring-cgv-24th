@@ -94,7 +94,7 @@ class AuthenticationFlowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 
-        assertFailure(mockMvc.perform(get("/api/movies/favorites")), 401, "TOKEN_NOT_EXIST");
+        assertFailure(mockMvc.perform(get("/api/movies/favorites")), 401, "TOKEN_NOT_EXIST401");
     }
 
     // 만료·변조·다른 키로 서명한 토큰과 잘못된 인증 헤더의 401 응답을 확인한다.
@@ -112,15 +112,15 @@ class AuthenticationFlowIntegrationTest {
         String tampered = String.join(".", parts);
 
         assertFailure(mockMvc.perform(get("/api/admin/check")
-                .header(HttpHeaders.AUTHORIZATION, bearer(expired))), 401, "TOKEN_EXPIRED");
+                .header(HttpHeaders.AUTHORIZATION, bearer(expired))), 401, "TOKEN_EXPIRED401");
         assertFailure(mockMvc.perform(get("/api/admin/check")
-                .header(HttpHeaders.AUTHORIZATION, bearer(tampered))), 401, "TOKEN_INVALID");
+                .header(HttpHeaders.AUTHORIZATION, bearer(tampered))), 401, "TOKEN_INVALID401");
         assertFailure(mockMvc.perform(get("/api/admin/check")
-                .header(HttpHeaders.AUTHORIZATION, bearer(wrongKey))), 401, "TOKEN_INVALID");
+                .header(HttpHeaders.AUTHORIZATION, bearer(wrongKey))), 401, "TOKEN_INVALID401");
         assertFailure(mockMvc.perform(get("/api/admin/check")
-                .header(HttpHeaders.AUTHORIZATION, "Basic abc")), 401, "TOKEN_INVALID");
+                .header(HttpHeaders.AUTHORIZATION, "Basic abc")), 401, "TOKEN_INVALID401");
         assertFailure(mockMvc.perform(get("/api/movies")
-                .header(HttpHeaders.AUTHORIZATION, bearer(tampered))), 401, "TOKEN_INVALID");
+                .header(HttpHeaders.AUTHORIZATION, bearer(tampered))), 401, "TOKEN_INVALID401");
     }
 
     // 실제 로그인 토큰으로 USER의 관리자 접근은 거부하고 ADMIN의 접근은 허용한다.
@@ -137,7 +137,7 @@ class AuthenticationFlowIntegrationTest {
 
         assertFailure(mockMvc.perform(get("/api/admin/check")
                 .header(HttpHeaders.AUTHORIZATION, bearer(login(user.email())))),
-                403, "ACCESS_DENIED");
+                403, "ACCESS_DENIED403");
 
         mockMvc.perform(get("/api/admin/check")
                         .header(HttpHeaders.AUTHORIZATION, bearer(login(adminEmail))))
