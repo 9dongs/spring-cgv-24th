@@ -40,11 +40,14 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -173,6 +176,63 @@ class AuthServiceTest {
                 () -> realRefreshService.findMemberByValidToken(first.refreshToken()));
         assertEquals(ErrorCode.REFRESH_TOKEN_INVALID, error.getErrorCode());
         assertSame(member, realRefreshService.findMemberByValidToken(second.refreshToken()));
+    }
+
+    // Access Token이 만료되어도 유효한 Refresh Token으로 DB의 현재 권한을 반영하고 기존 Refresh는 유지한다.
+    @Test
+    void refreshAfterAccessExpirationUsesCurrentRoleWithoutRotatingRefreshToken() {
+        Instant issuedAt = Instant.parse("2026-09-30T06:00:00Z");
+        JwtProperties properties = new JwtProperties(
+                Encoders.BASE64.encode(Jwts.SIG.HS256.key().build().getEncoded()),
+                "spring-cgv-24th", "spring-cgv-api", Duration.ofMinutes(15), Duration.ofDays(7));
+        JwtProvider issuer = new JwtProvider(properties, Clock.fixed(issuedAt, ZoneOffset.UTC));
+        Clock currentClock = Clock.fixed(issuedAt.plus(Duration.ofMinutes(16)), ZoneOffset.UTC);
+        JwtProvider verifier = new JwtProvider(properties, currentClock);
+        RefreshTokenHasher hasher = new RefreshTokenHasher();
+        RefreshTokenService realRefreshService = new RefreshTokenService(
+                memberRepository, verifier, hasher, currentClock);
+        AuthService service = new AuthService(
+                memberRepository, passwordEncoder, authenticationManager, verifier, realRefreshService);
+        Member member = Member.builder()
+                .email(EMAIL)
+                .name("테스트 회원")
+                .passwordHash("encoded-password")
+                .role(MemberRole.ADMIN)
+                .build();
+        ReflectionTestUtils.setField(member, "id", 7L);
+        String refreshToken = issuer.createRefreshToken(7L);
+        String storedHash = hasher.hash(refreshToken);
+        member.replaceRefreshToken(storedHash);
+        when(memberRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(member));
+        String expiredAccessToken = issuer.createAccessToken(7L, MemberRole.USER);
+
+        CustomException expired = assertThrows(CustomException.class,
+                () -> verifier.parseAccessToken(expiredAccessToken));
+        assertEquals(ErrorCode.TOKEN_EXPIRED, expired.getErrorCode());
+
+        AuthResDTO.RefreshResDTO response = service.refresh(new AuthReqDTO.RefreshReqDTO(refreshToken));
+
+        assertNotEquals(expiredAccessToken, response.accessToken());
+        assertEquals(7L, verifier.parseAccessToken(response.accessToken()).memberId());
+        assertEquals(MemberRole.ADMIN, verifier.parseAccessToken(response.accessToken()).role());
+        assertEquals(storedHash, member.getRefreshTokenHash());
+        assertEquals(issuedAt.plus(Duration.ofDays(7)), verifier.parseRefreshToken(refreshToken).expiresAt());
+        assertSame(member, realRefreshService.findMemberByValidToken(refreshToken));
+        verifyNoInteractions(authenticationManager, passwordEncoder);
+    }
+
+    // 만료·폐기 등으로 Refresh 검증이 실패하면 같은 오류를 전달하고 Access Token을 발급하지 않는다.
+    @ParameterizedTest
+    @EnumSource(value = ErrorCode.class, names = {"REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_INVALID"})
+    void invalidRefreshTokenDoesNotIssueAccessToken(ErrorCode errorCode) {
+        when(refreshTokenService.findMemberByValidToken("invalid-refresh-token"))
+                .thenThrow(new CustomException(errorCode));
+
+        CustomException error = assertThrows(CustomException.class,
+                () -> authService.refresh(new AuthReqDTO.RefreshReqDTO("invalid-refresh-token")));
+
+        assertEquals(errorCode, error.getErrorCode());
+        verifyNoInteractions(jwtProvider, memberRepository, authenticationManager, passwordEncoder);
     }
 
     // 인증 실패는 LOGIN_FAILED로 변환하고 두 토큰 모두 발급하지 않아 기존 해시도 변경하지 않는다.

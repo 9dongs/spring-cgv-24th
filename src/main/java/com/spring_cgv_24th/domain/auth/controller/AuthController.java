@@ -37,4 +37,12 @@ public class AuthController {
             @Valid @RequestBody AuthReqDTO.LoginReqDTO request) {
         return ApiResponse.onSuccess(authService.login(request));
     }
+
+    @Operation(summary = "Access Token 재발급",
+            description = "요청 본문의 Refresh Token으로 재발급합니다. Access Token 인증은 필요하지 않습니다.")
+    @PostMapping("/refresh")
+    public ApiResponse<AuthResDTO.RefreshResDTO> refresh(
+            @Valid @RequestBody AuthReqDTO.RefreshReqDTO request) {
+        return ApiResponse.onSuccess(authService.refresh(request));
+    }
 }

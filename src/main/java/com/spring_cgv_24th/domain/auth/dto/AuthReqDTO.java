@@ -44,4 +44,10 @@ public class AuthReqDTO {
             String password
     ) {
     }
+
+    public record RefreshReqDTO(
+            @NotBlank(message = "Refresh Token은 필수입니다.")
+            String refreshToken
+    ) {
+    }
 }

@@ -31,4 +31,12 @@ public class AuthResDTO {
             return new LoginResDTO(accessToken, refreshToken);
         }
     }
+
+    public record RefreshResDTO(
+            String accessToken
+    ) {
+        public static RefreshResDTO from(String accessToken) {
+            return new RefreshResDTO(accessToken);
+        }
+    }
 }

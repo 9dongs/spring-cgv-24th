@@ -60,4 +60,12 @@ public class AuthService {
             throw new CustomException(ErrorCode.LOGIN_FAILED);
         }
     }
+
+    // 회원 행 잠금이 Access Token 발급까지 유지되도록 쓰기 트랜잭션을 사용한다.
+    @Transactional
+    public AuthResDTO.RefreshResDTO refresh(AuthReqDTO.RefreshReqDTO request) {
+        Member member = refreshTokenService.findMemberByValidToken(request.refreshToken());
+        String accessToken = jwtProvider.createAccessToken(member.getId(), member.getRole());
+        return AuthResDTO.RefreshResDTO.from(accessToken);
+    }
 }
