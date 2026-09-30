@@ -11,6 +11,7 @@ import io.jsonwebtoken.io.Encoders;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Date;
 import javax.crypto.SecretKey;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,20 +22,23 @@ class JwtProviderTest {
 
     private static final String ISSUER = "spring-cgv-24th";
     private static final String AUDIENCE = "spring-cgv-api";
+    private static final Instant NOW = Instant.parse("2026-09-30T06:00:00Z");
+    private static final Duration ACCESS_EXPIRATION = Duration.ofMinutes(15);
 
     private SecretKey signingKey;
+    private JwtProperties properties;
     private JwtProvider jwtProvider;
 
     @BeforeEach
     void setUp() {
         signingKey = Jwts.SIG.HS256.key().build();
-        JwtProperties properties = new JwtProperties(
+        properties = new JwtProperties(
                 Encoders.BASE64.encode(signingKey.getEncoded()),
                 ISSUER,
                 AUDIENCE,
-                Duration.ofMinutes(15),
+                ACCESS_EXPIRATION,
                 Duration.ofDays(7));
-        jwtProvider = new JwtProvider(properties, Clock.systemUTC());
+        jwtProvider = providerAt(NOW);
     }
 
     // 발급한 Access Token에서 회원 ID와 USER 역할을 다시 읽을 수 있다.
@@ -53,13 +57,45 @@ class JwtProviderTest {
     @Test
     @DisplayName("만료된 토큰은 TOKEN_EXPIRED로 처리한다")
     void expiredToken() {
-        Instant now = Instant.now();
         String token = createToken(
                 signingKey,
-                now.minus(Duration.ofMinutes(30)),
-                now.minus(Duration.ofMinutes(15)));
+                NOW.minus(Duration.ofMinutes(30)),
+                NOW.minus(Duration.ofMinutes(15)));
 
         assertErrorCode(token, ErrorCode.TOKEN_EXPIRED);
+    }
+
+    // 만료 시각 직전까지는 기존처럼 회원 정보와 권한을 검증하여 반환한다.
+    @Test
+    @DisplayName("만료 시각 직전의 Access Token은 검증에 성공한다")
+    void acceptsAccessTokenJustBeforeExpiration() {
+        String token = jwtProvider.createAccessToken(1L, MemberRole.USER);
+        JwtProvider verifier = providerAt(NOW.plus(ACCESS_EXPIRATION).minusNanos(1));
+
+        AccessTokenClaims claims = verifier.parseAccessToken(token);
+
+        assertThat(claims.memberId()).isEqualTo(1L);
+        assertThat(claims.role()).isEqualTo(MemberRole.USER);
+    }
+
+    // 현재 시각이 exp와 같으면 Refresh Token과 동일하게 이미 만료된 것으로 처리한다.
+    @Test
+    @DisplayName("만료 시각에 정확히 도달한 Access Token은 TOKEN_EXPIRED로 처리한다")
+    void rejectsAccessTokenAtExactExpiration() {
+        String token = jwtProvider.createAccessToken(1L, MemberRole.USER);
+        JwtProvider verifier = providerAt(NOW.plus(ACCESS_EXPIRATION));
+
+        assertErrorCode(verifier, token, ErrorCode.TOKEN_EXPIRED);
+    }
+
+    // JWT 라이브러리의 밀리초 시계로는 구분되지 않는 만료 직후도 실제 Clock 기준으로 거부한다.
+    @Test
+    @DisplayName("만료 시각을 1나노초 지난 Access Token도 TOKEN_EXPIRED로 처리한다")
+    void rejectsAccessTokenJustAfterExpiration() {
+        String token = jwtProvider.createAccessToken(1L, MemberRole.USER);
+        JwtProvider verifier = providerAt(NOW.plus(ACCESS_EXPIRATION).plusNanos(1));
+
+        assertErrorCode(verifier, token, ErrorCode.TOKEN_EXPIRED);
     }
 
     // 토큰의 서명 부분이 바뀌면 TOKEN_INVALID로 거부한다.
@@ -80,8 +116,7 @@ class JwtProviderTest {
     @DisplayName("다른 키로 서명한 토큰은 TOKEN_INVALID로 처리한다")
     void tokenSignedWithDifferentKey() {
         SecretKey otherKey = Jwts.SIG.HS256.key().build();
-        Instant now = Instant.now();
-        String token = createToken(otherKey, now, now.plus(Duration.ofMinutes(15)));
+        String token = createToken(otherKey, NOW, NOW.plus(ACCESS_EXPIRATION));
 
         assertErrorCode(token, ErrorCode.TOKEN_INVALID);
     }
@@ -90,11 +125,10 @@ class JwtProviderTest {
     @Test
     @DisplayName("기대한 발급자와 다른 토큰은 TOKEN_INVALID로 처리한다")
     void tokenWithDifferentIssuer() {
-        Instant now = Instant.now();
         String token = createToken(
                 signingKey,
-                now,
-                now.plus(Duration.ofMinutes(15)),
+                NOW,
+                NOW.plus(ACCESS_EXPIRATION),
                 "other-issuer",
                 AUDIENCE);
 
@@ -105,11 +139,10 @@ class JwtProviderTest {
     @Test
     @DisplayName("기대한 대상과 다른 토큰은 TOKEN_INVALID로 처리한다")
     void tokenWithDifferentAudience() {
-        Instant now = Instant.now();
         String token = createToken(
                 signingKey,
-                now,
-                now.plus(Duration.ofMinutes(15)),
+                NOW,
+                NOW.plus(ACCESS_EXPIRATION),
                 ISSUER,
                 "other-api");
 
@@ -146,9 +179,17 @@ class JwtProviderTest {
     }
 
     private void assertErrorCode(String token, ErrorCode expectedErrorCode) {
-        assertThatThrownBy(() -> jwtProvider.parseAccessToken(token))
+        assertErrorCode(jwtProvider, token, expectedErrorCode);
+    }
+
+    private void assertErrorCode(JwtProvider verifier, String token, ErrorCode expectedErrorCode) {
+        assertThatThrownBy(() -> verifier.parseAccessToken(token))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(expectedErrorCode);
+    }
+
+    private JwtProvider providerAt(Instant instant) {
+        return new JwtProvider(properties, Clock.fixed(instant, ZoneOffset.UTC));
     }
 }

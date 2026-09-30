@@ -137,6 +137,11 @@ public class JwtProvider {
             throw new IllegalArgumentException("필수 시간 Claim이 없습니다.");
         }
 
+        // Refresh Token과 동일하게 현재 시각이 만료 시각에 도달한 경우부터 거부한다.
+        if (!claims.getExpiration().toInstant().isAfter(clock.instant())) {
+            throw new CustomException(ErrorCode.TOKEN_EXPIRED);
+        }
+
         String subject = claims.getSubject();
         String roleClaim = claims.get(ROLE_CLAIM, String.class);
         if (subject == null || roleClaim == null) {
