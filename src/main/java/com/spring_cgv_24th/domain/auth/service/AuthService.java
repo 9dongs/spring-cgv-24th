@@ -27,6 +27,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtProvider jwtProvider;
+    private final RefreshTokenService refreshTokenService;
 
     @Transactional
     public AuthResDTO.SignUpResDTO signUp(AuthReqDTO.SignUpReqDTO request) {
@@ -44,6 +45,7 @@ public class AuthService {
         return AuthResDTO.SignUpResDTO.from(memberRepository.save(member));
     }
 
+    @Transactional
     public AuthResDTO.LoginResDTO login(AuthReqDTO.LoginReqDTO request) {
         try {
             Authentication authentication = authenticationManager.authenticate(
@@ -52,7 +54,8 @@ public class AuthService {
             CustomUserDetails principal = (CustomUserDetails) authentication.getPrincipal();
             String accessToken = jwtProvider.createAccessToken(
                     principal.getMemberId(), principal.getRole());
-            return AuthResDTO.LoginResDTO.from(accessToken);
+            String refreshToken = refreshTokenService.issue(principal.getMemberId());
+            return AuthResDTO.LoginResDTO.from(accessToken, refreshToken);
         } catch (BadCredentialsException e) {
             throw new CustomException(ErrorCode.LOGIN_FAILED);
         }

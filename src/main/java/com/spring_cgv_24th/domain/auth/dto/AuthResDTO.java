@@ -24,10 +24,11 @@ public class AuthResDTO {
     }
 
     public record LoginResDTO(
-            String accessToken
+            String accessToken,
+            String refreshToken
     ) {
-        public static LoginResDTO from(String accessToken) {
-            return new LoginResDTO(accessToken);
+        public static LoginResDTO from(String accessToken, String refreshToken) {
+            return new LoginResDTO(accessToken, refreshToken);
         }
     }
 }
