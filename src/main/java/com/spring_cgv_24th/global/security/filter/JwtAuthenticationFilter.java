@@ -63,7 +63,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return EXCLUDED_PATHS.contains(request.getRequestURI());
+        return "POST".equals(request.getMethod()) && EXCLUDED_PATHS.contains(request.getRequestURI());
     }
 
     private String resolveToken(HttpServletRequest request) {

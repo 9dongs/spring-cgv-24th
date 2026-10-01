@@ -1447,7 +1447,9 @@ Access Token은 보호 API에 접근할 때 사용된다.
 
 토큰이 없으면 인증 객체를 만들지 않고 다음 필터로 넘기며, 최종 허용 여부는 경로별 인가 규칙이 결정한다. 
 
-토큰이 잘못됐다면 공개 API 여도 `401`을 반환한다. (로그인이랑 회원가입은 제외)
+토큰이 잘못됐다면 인증 없이 접근 가능한 조회 API에서도 `401`을 반환한다. 
+
+회원가입/로그인/재발급/로그아웃의 `POST` 요청만 Access Token 필터 검사에서 제외한다.
 
 필터는 Spring Security 체인에 한 번만 추가한다. 
 
@@ -1460,6 +1462,21 @@ Access Token은 보호 API에 접근할 때 사용된다.
 | 인증 불필요 | 회원가입·로그인, 영화·영화관·상영 회차·좌석·매점 상품 조회                           |
 | 로그인 필요 | 영화·영화관 찜 추가·해제·목록, 영화 예매·취소, 매점 구매                           |
 | `ADMIN` 필요 | 영화·영화관·상영관·상영 회차 생성, 매점 재고 변경, `/api/admin/**` 전체(권한 체크 포함) |
+
+인증 없이 접근할 수 있는 업무 API는 아래 HTTP 메서드 경로만 명시적으로 허용한다. 
+
+ID 변수는 숫자(`[0-9]+`)로 제한해 `/api/movies/favorites` 같은 보호 경로와 겹치지 않도록 한다.
+
+| HTTP 메서드 | 인증 없이 접근 가능한 경로 |
+| --- | --- |
+| `POST` | `/api/auth/signup`, `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout` |
+| `GET` | `/api/movies`, `/api/movies/{movieId}` |
+| `GET` | `/api/theaters`, `/api/theaters/{theaterId}` |
+| `GET` | `/api/theaters/{theaterId}/auditoriums`, `/api/theaters/{theaterId}/store/products` |
+| `GET` | `/api/screenings`, `/api/screenings/{screeningId}`, `/api/screenings/{screeningId}/seats` |
+| `GET` | `/api/store/products` |
+
+찜 목록을 포함해 위 목록에 없는 업무 API는 기본적으로 인증이 필요하다. 따라서 새로운 하위 GET API가 `/api/theaters/**` 같은 넓은 공개 규칙에 의해 자동으로 허용되지 않는다. Swagger UI·API 문서와 오류 처리 경로의 기존 허용 규칙은 유지한다.
 
 찜,예매,구매 API 요청은 `@AuthenticationPrincipal`에서 인증된 회원 ID를 사용한다. 
 

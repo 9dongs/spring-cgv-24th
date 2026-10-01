@@ -41,11 +41,17 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(
-                                "/api/auth/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**",
                                 "/error")
+                            .permitAll()
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/auth/signup",
+                                "/api/auth/login",
+                                "/api/auth/refresh",
+                                "/api/auth/logout")
                             .permitAll()
                         // 새 관리자 API도 HTTP 메서드와 무관하게 ADMIN 권한을 요구한다.
                         .requestMatchers("/api/admin/**")
@@ -61,16 +67,18 @@ public class SecurityConfig {
                                 HttpMethod.PATCH,
                                 "/api/theaters/*/store/products/*/stock")
                             .hasRole("ADMIN")
+                        // 공개 조회만 명시한다. 숫자 ID로 제한해 favorites 같은 보호 경로와 겹치지 않는다.
                         .requestMatchers(
                                 HttpMethod.GET,
-                                "/api/movies/favorites",
-                                "/api/theaters/favorites")
-                            .authenticated()
-                        .requestMatchers(
-                                HttpMethod.GET,
-                                "/api/movies/**",
-                                "/api/theaters/**",
-                                "/api/screenings/**",
+                                "/api/movies",
+                                "/api/movies/{movieId:[0-9]+}",
+                                "/api/theaters",
+                                "/api/theaters/{theaterId:[0-9]+}",
+                                "/api/theaters/{theaterId:[0-9]+}/auditoriums",
+                                "/api/theaters/{theaterId:[0-9]+}/store/products",
+                                "/api/screenings",
+                                "/api/screenings/{screeningId:[0-9]+}",
+                                "/api/screenings/{screeningId:[0-9]+}/seats",
                                 "/api/store/products")
                             .permitAll()
                         .anyRequest()

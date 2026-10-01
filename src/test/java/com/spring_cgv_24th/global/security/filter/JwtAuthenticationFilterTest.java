@@ -236,11 +236,12 @@ class JwtAuthenticationFilterTest {
         assertThat(json.has("data")).isFalse();
     }
 
-    // 로그인은 JWT 필터의 검사 대상에서 제외되어 헤더와 무관하게 다음 필터로 간다.
+    // 로그인 POST는 JWT 필터의 검사 대상에서 제외되어 헤더와 무관하게 다음 필터로 간다.
     @Test
-    @DisplayName("로그인 경로에서는 JWT 필터를 실행하지 않는다")
+    @DisplayName("로그인 POST 경로에서는 JWT 필터를 실행하지 않는다")
     void skipLoginPath() throws Exception {
         MockHttpServletRequest request = request("/api/auth/login");
+        request.setMethod("POST");
         request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer access-token");
 
         filter.doFilter(request, response, filterChain);
