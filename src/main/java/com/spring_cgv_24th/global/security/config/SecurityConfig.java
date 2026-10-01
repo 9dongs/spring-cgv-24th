@@ -47,7 +47,8 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/error")
                             .permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/admin/check")
+                        // 새 관리자 API도 HTTP 메서드와 무관하게 ADMIN 권한을 요구한다.
+                        .requestMatchers("/api/admin/**")
                             .hasRole("ADMIN")
                         .requestMatchers(
                                 HttpMethod.POST,
