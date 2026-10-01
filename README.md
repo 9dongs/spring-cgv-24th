@@ -1570,4 +1570,21 @@ JWT의 Payload는 암호화된 정보가 아니어서 누구나 내용을 읽을
 
 현재는 하나의 CGV API에서 사용하지만, 나중에 미션으로 결제 기능을 추가하는걸로 알고있는데, 결제 서비스처럼 별도 서비스와 연동할 때 그 서비스가 우리 토큰을 받아서 사용한다면, 사용 범위를 명확히 하는 데 도움이 될 수 있다고 느꼈다.
 
+## 코드리뷰에서 추천받은 JsonMapper
+
+Spring Boot 4는 Jackson 3 JsonMapper를 기본 JSON 라이브러리로 사용하다고 한다.
+
+기존 테스트에서 사용하던 Jackson 2의 `ObjectMapper` 대신 Jackson 3의 `JsonMapper`를 사용해, JSON 처리 기준을 맞추고 버전별 기본 동작 차이로 생길 수 있는 혼란을 줄일 수 있다. [Spring Boot 공식 문서](https://docs.spring.io/spring-boot/reference/features/json.html)
+
+또한 Jackson 3의 mapper는 생성 후 설정을 변경할 수 없는 구조이므로, 여러 테스트에서 같은 인스턴스를 재사용하더라도 실행 중 설정 변경이 다른 테스트에 영향을 주는 문제를 예방할 수 있다는걸 알게 되었다.
+
+| 항목 | 기존 `ObjectMapper` — Jackson 2 | 변경한 `JsonMapper` — Jackson 3 |
+| --- | --- | --- |
+| 역할 | 데이터 매핑의 공통 기능을 제공하는 클래스 | JSON 처리에 특화된 클래스 |
+| 관계 | 부모 클래스 | `ObjectMapper`를 상속한 자식 클래스 |
+| JSON 변환 | 직렬화·역직렬화 지원 | 동일하게 지원 |
+| 주요 메서드 | `readValue`, `writeValueAsString`, `readTree` 등 | 같은 메서드 사용 가능 |
+| 패키지 | `com.fasterxml.jackson.databind` | `tools.jackson.databind.json` |
+| 설정 방식 | 생성 후에도 설정 변경 가능 | Builder에서 설정하고, 생성 후에는 설정 변경 불가 |
+| 이번 적용 이유 | 애플리케이션과 다른 Jackson 버전 사용 | Spring Boot 4의 기본 JSON 처리 방식과 일치 |
 </details>

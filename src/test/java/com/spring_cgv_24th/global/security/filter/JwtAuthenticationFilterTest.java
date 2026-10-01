@@ -12,7 +12,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spring_cgv_24th.domain.auth.controller.AuthController;
 import com.spring_cgv_24th.domain.auth.dto.AuthReqDTO;
 import com.spring_cgv_24th.domain.auth.dto.AuthResDTO;
@@ -59,9 +58,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.servlet.HandlerExceptionResolver;
+import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class JwtAuthenticationFilterTest {
+
+    private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
 
     @Mock private JwtProvider jwtProvider;
     @Mock private AuthenticationEntryPoint authenticationEntryPoint;
@@ -213,10 +215,10 @@ class JwtAuthenticationFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(response.getContentType()).startsWith(MediaType.APPLICATION_JSON_VALUE);
-        var json = new ObjectMapper().readTree(response.getContentAsString());
+        var json = JSON_MAPPER.readTree(response.getContentAsString());
         assertThat(json.path("success").asBoolean()).isFalse();
-        assertThat(json.path("code").asText()).isEqualTo(expectedCode);
-        assertThat(json.path("message").asText()).isEqualTo(errorCode.getMessage());
+        assertThat(json.path("code").asString()).isEqualTo(expectedCode);
+        assertThat(json.path("message").asString()).isEqualTo(errorCode.getMessage());
         assertThat(json.has("data")).isFalse();
     }
 
@@ -229,10 +231,10 @@ class JwtAuthenticationFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(403);
         assertThat(response.getContentType()).startsWith(MediaType.APPLICATION_JSON_VALUE);
-        var json = new ObjectMapper().readTree(response.getContentAsString());
+        var json = JSON_MAPPER.readTree(response.getContentAsString());
         assertThat(json.path("success").asBoolean()).isFalse();
-        assertThat(json.path("code").asText()).isEqualTo("ACCESS_DENIED403");
-        assertThat(json.path("message").asText()).isEqualTo(ErrorCode.ACCESS_DENIED.getMessage());
+        assertThat(json.path("code").asString()).isEqualTo("ACCESS_DENIED403");
+        assertThat(json.path("message").asString()).isEqualTo(ErrorCode.ACCESS_DENIED.getMessage());
         assertThat(json.has("data")).isFalse();
     }
 
@@ -270,7 +272,7 @@ class JwtAuthenticationFilterTest {
         MockMvc mockMvc = authMvc(realFilter, authService);
         MockHttpServletRequestBuilder apiRequest = post("/api/auth/refresh")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(new ObjectMapper().writeValueAsString(request));
+                .content(JSON_MAPPER.writeValueAsString(request));
         if (includeExpiredAccessHeader) {
             apiRequest.header(HttpHeaders.AUTHORIZATION,
                     "Bearer " + oldIssuer.createAccessToken(1L, MemberRole.USER));
@@ -301,7 +303,7 @@ class JwtAuthenticationFilterTest {
         authMvc(filter, authService).perform(post("/api/auth/refresh")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer expired-access-token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(new ObjectMapper().writeValueAsString(request)))
+                        .content(JSON_MAPPER.writeValueAsString(request)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.code").value(expectedCode))
@@ -321,7 +323,7 @@ class JwtAuthenticationFilterTest {
 
         authMvc(filter, authService).perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(new ObjectMapper().writeValueAsString(new AuthReqDTO.RefreshReqDTO(refreshToken))))
+                        .content(JSON_MAPPER.writeValueAsString(new AuthReqDTO.RefreshReqDTO(refreshToken))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.code").value("COMMON400"));
@@ -346,7 +348,7 @@ class JwtAuthenticationFilterTest {
         AuthReqDTO.LogoutReqDTO request = new AuthReqDTO.LogoutReqDTO(realProvider.createRefreshToken(1L));
         MockHttpServletRequestBuilder apiRequest = post("/api/auth/logout")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(new ObjectMapper().writeValueAsString(request));
+                .content(JSON_MAPPER.writeValueAsString(request));
         if (includeExpiredAccessHeader) {
             apiRequest.header(HttpHeaders.AUTHORIZATION,
                     "Bearer " + oldIssuer.createAccessToken(1L, MemberRole.USER));
@@ -377,7 +379,7 @@ class JwtAuthenticationFilterTest {
         authMvc(filter, authService).perform(post("/api/auth/logout")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer expired-access-token")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(new ObjectMapper().writeValueAsString(request)))
+                        .content(JSON_MAPPER.writeValueAsString(request)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.code").value(expectedCode))
@@ -397,7 +399,7 @@ class JwtAuthenticationFilterTest {
 
         authMvc(filter, authService).perform(post("/api/auth/logout")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(new ObjectMapper().writeValueAsString(new AuthReqDTO.LogoutReqDTO(refreshToken))))
+                        .content(JSON_MAPPER.writeValueAsString(new AuthReqDTO.LogoutReqDTO(refreshToken))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.code").value("COMMON400"));

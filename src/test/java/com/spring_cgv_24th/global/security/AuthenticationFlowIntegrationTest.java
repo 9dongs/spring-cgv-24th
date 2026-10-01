@@ -7,8 +7,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spring_cgv_24th.domain.favorite.repository.MovieFavoriteRepository;
 import com.spring_cgv_24th.domain.member.entity.Member;
 import com.spring_cgv_24th.domain.member.enums.MemberRole;
@@ -35,6 +33,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -42,9 +41,9 @@ import org.springframework.transaction.annotation.Transactional;
 class AuthenticationFlowIntegrationTest {
 
     private static final String PASSWORD = "Password123!";
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Autowired private MockMvc mockMvc;
+    @Autowired private JsonMapper jsonMapper;
     @Autowired private MemberRepository memberRepository;
     @Autowired private MovieRepository movieRepository;
     @Autowired private MovieFavoriteRepository movieFavoriteRepository;
@@ -194,7 +193,7 @@ class AuthenticationFlowIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.role").value("USER"))
                 .andReturn().getResponse().getContentAsString();
-        long memberId = OBJECT_MAPPER.readTree(response).path("data").path("memberId").asLong();
+        long memberId = jsonMapper.readTree(response).path("data").path("memberId").asLong();
         return new Account(memberId, email);
     }
 
@@ -205,7 +204,7 @@ class AuthenticationFlowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.accessToken").isNotEmpty())
                 .andReturn().getResponse().getContentAsString();
-        return OBJECT_MAPPER.readTree(response).path("data").path("accessToken").asText();
+        return jsonMapper.readTree(response).path("data").path("accessToken").asString();
     }
 
     private String signedToken(SecretKey key, Instant issuedAt, Instant expiresAt) {

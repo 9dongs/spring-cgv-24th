@@ -16,8 +16,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spring_cgv_24th.domain.auth.dto.AuthReqDTO;
 import com.spring_cgv_24th.domain.auth.dto.AuthResDTO;
 import com.spring_cgv_24th.domain.auth.token.RefreshTokenHasher;
@@ -51,12 +49,15 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
 
     private static final String EMAIL = "user@example.com";
     private static final String PASSWORD = "Password123!";
+    private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
 
     @Mock private MemberRepository memberRepository;
     @Mock private PasswordEncoder passwordEncoder;
@@ -129,9 +130,9 @@ class AuthServiceTest {
         verify(refreshTokenService).issue(7L);
         assertEquals("access-token", response.accessToken());
         assertEquals("refresh-token", response.refreshToken());
-        JsonNode json = new ObjectMapper().valueToTree(response);
-        assertEquals("access-token", json.path("accessToken").asText());
-        assertEquals("refresh-token", json.path("refreshToken").asText());
+        JsonNode json = JSON_MAPPER.valueToTree(response);
+        assertEquals("access-token", json.path("accessToken").asString());
+        assertEquals("refresh-token", json.path("refreshToken").asString());
         verifyNoInteractions(memberRepository, passwordEncoder);
     }
 
