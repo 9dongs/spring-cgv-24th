@@ -20,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class AuthService {
 
     private final MemberRepository memberRepository;
@@ -45,7 +44,7 @@ public class AuthService {
         return AuthResDTO.SignUpResDTO.from(memberRepository.save(member));
     }
 
-    @Transactional
+    // 회원 조회와 Refresh Token 저장은 각 서비스의 트랜잭션으로 처리한다.
     public AuthResDTO.LoginResDTO login(AuthReqDTO.LoginReqDTO request) {
         try {
             Authentication authentication = authenticationManager.authenticate(
