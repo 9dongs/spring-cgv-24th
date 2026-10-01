@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,6 +58,7 @@ public class StoreService {
     }
 
     @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
     public TheaterStockResDTO replenishStock(Long theaterId, Long productId, StoreStockReqDTO request) {
         Integer additionalQuantity = request.quantity();
         if (additionalQuantity == null || additionalQuantity <= 0) {
