@@ -6,7 +6,6 @@ import com.spring_cgv_24th.domain.reservation.dto.ReservationReqDTO;
 import com.spring_cgv_24th.domain.reservation.dto.ReservationResDTO;
 import com.spring_cgv_24th.domain.reservation.entity.Reservation;
 import com.spring_cgv_24th.domain.reservation.entity.ReservationSeat;
-import com.spring_cgv_24th.domain.reservation.enums.ReservationStatus;
 import com.spring_cgv_24th.domain.reservation.repository.ReservationRepository;
 import com.spring_cgv_24th.domain.reservation.repository.ReservationSeatRepository;
 import com.spring_cgv_24th.domain.screening.entity.Screening;
@@ -40,31 +39,18 @@ public class ReservationService {
     @Transactional
     public ReservationResDTO createReservation(Long memberId, ReservationReqDTO.CreateReservationDTO request) {
         List<Long> seatIds = request.screeningSeatIds();
-        if (seatIds == null || seatIds.isEmpty() || seatIds.stream().anyMatch(id -> id == null || id <= 0)
-                || new HashSet<>(seatIds).size() != seatIds.size()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
-        }
+        validateSeatIds(seatIds);
 
         Screening screening = screeningRepository.findById(request.screeningId())
                 .orElseThrow(() -> new CustomException(ErrorCode.SCREENING_NOT_FOUND));
-        requireBeforeStart(screening, ErrorCode.SCREENING_ALREADY_STARTED);
+        screening.validateReservationTime(LocalDateTime.now(clock));
         Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
 
-        // 서로 겹치는 좌석 요청도 항상 같은 ID 순서로 잠근다. 동시성 문제 방지
-        List<ScreeningSeat> seats = new ArrayList<>();
-        for (Long seatId : seatIds.stream().sorted().toList()) {
-            ScreeningSeat seat = screeningSeatRepository
-                    .findByIdAndScreeningIdForUpdate(seatId, screening.getId())
-                    .orElseThrow(() -> new CustomException(ErrorCode.SCREENING_SEAT_NOT_FOUND));
-            if (seat.getReservation() != null) {
-                throw new CustomException(ErrorCode.SEAT_ALREADY_RESERVED);
-            }
-            seats.add(seat);
-        }
+        List<ScreeningSeat> seats = lockAvailableSeats(screening.getId(), seatIds);
 
         // 좌석 잠금을 기다리는 동안 상영이 시작될 수 있으므로 저장 직전에 다시 확인한다.
-        requireBeforeStart(screening, ErrorCode.SCREENING_ALREADY_STARTED);
+        screening.validateReservationTime(LocalDateTime.now(clock));
 
         long totalPrice = seats.stream().mapToLong(ScreeningSeat::getPrice).sum();
         Reservation reservation = reservationRepository.save(Reservation.builder()
@@ -92,24 +78,31 @@ public class ReservationService {
         if (owner == null || !Objects.equals(owner.getId(), memberId)) {
             throw new CustomException(ErrorCode.RESERVATION_FORBIDDEN);
         }
-        if (reservation.getStatus() == ReservationStatus.CANCELLED) {
-            throw new CustomException(ErrorCode.RESERVATION_ALREADY_CANCELLED);
-        }
-        requireBeforeStart(reservation.getScreening(), ErrorCode.RESERVATION_CANCELLATION_CLOSED);
+        reservation.validateCancellation(LocalDateTime.now(clock));
 
         // 현재 이 예매가 점유한 좌석만 해제하고 상태를 함께 변경한다.
         List<ScreeningSeat> seats = screeningSeatRepository.findAllByReservationIdForUpdate(reservationId);
-        LocalDateTime cancelledAt = requireBeforeStart(
-                reservation.getScreening(), ErrorCode.RESERVATION_CANCELLATION_CLOSED);
+        // 좌석 잠금 대기 후의 시각으로 취소 가능 여부를 다시 검증한다.
+        reservation.cancel(LocalDateTime.now(clock));
         seats.forEach(ScreeningSeat::release);
-        reservation.cancel(cancelledAt);
     }
 
-    private LocalDateTime requireBeforeStart(Screening screening, ErrorCode errorCode) {
-        LocalDateTime now = LocalDateTime.now(clock);
-        if (!now.isBefore(screening.getStartsAt())) {
-            throw new CustomException(errorCode);
+    private void validateSeatIds(List<Long> seatIds) {
+        if (seatIds == null || seatIds.isEmpty() || seatIds.stream().anyMatch(id -> id == null || id <= 0)
+                || new HashSet<>(seatIds).size() != seatIds.size()) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
         }
-        return now;
+    }
+
+    private List<ScreeningSeat> lockAvailableSeats(Long screeningId, List<Long> seatIds) {
+        // 겹치는 좌석 요청도 같은 ID 순서로 잠가 교착 상태 가능성을 줄인다.
+        List<ScreeningSeat> seats = new ArrayList<>();
+        for (Long seatId : seatIds.stream().sorted().toList()) {
+            ScreeningSeat seat = screeningSeatRepository.findByIdAndScreeningIdForUpdate(seatId, screeningId)
+                    .orElseThrow(() -> new CustomException(ErrorCode.SCREENING_SEAT_NOT_FOUND));
+            seat.validateAvailable();
+            seats.add(seat);
+        }
+        return seats;
     }
 }

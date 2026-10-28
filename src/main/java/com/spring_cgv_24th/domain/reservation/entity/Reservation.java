@@ -62,7 +62,15 @@ public class Reservation {
         this.totalPrice = totalPrice;
     }
 
+    public void validateCancellation(LocalDateTime now) {
+        if (status == ReservationStatus.CANCELLED) {
+            throw new CustomException(ErrorCode.RESERVATION_ALREADY_CANCELLED);
+        }
+        screening.validateCancellationTime(now);
+    }
+
     public void cancel(LocalDateTime cancelledAt) {
+        validateCancellation(cancelledAt);
         this.cancelledAt = cancelledAt;
         this.status = ReservationStatus.CANCELLED;
     }

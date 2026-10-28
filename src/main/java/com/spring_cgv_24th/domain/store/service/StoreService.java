@@ -87,12 +87,7 @@ public class StoreService {
 
     @Transactional
     public StoreOrderResDTO createOrder(Long theaterId, Long memberId, StoreOrderReqDTO.CreateOrderDTO request) {
-        List<Long> productIds = request.items().stream()
-                .map(StoreOrderReqDTO.OrderItemDTO::productId)
-                .toList();
-        if (new HashSet<>(productIds).size() != productIds.size()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
-        }
+        validateUniqueProducts(request.items());
 
         Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
@@ -103,10 +98,25 @@ public class StoreService {
                 .member(member)
                 .theater(theater)
                 .build();
+        List<StoreOrderItem> items = reserveStockAndCreateItems(theaterId, order, request.items());
+
+        storeOrderRepository.save(order);
+        return StoreOrderResDTO.from(order, storeOrderItemRepository.saveAll(items));
+    }
+
+    private void validateUniqueProducts(List<StoreOrderReqDTO.OrderItemDTO> items) {
+        List<Long> productIds = items.stream().map(StoreOrderReqDTO.OrderItemDTO::productId).toList();
+        if (new HashSet<>(productIds).size() != productIds.size()) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private List<StoreOrderItem> reserveStockAndCreateItems(
+            Long theaterId, StoreOrder order, List<StoreOrderReqDTO.OrderItemDTO> orderItems) {
         List<StoreOrderItem> items = new ArrayList<>();
 
         // 동시 구매 시 재고 행의 잠금 순서가 엇갈리지 않도록 상품 ID 오름차순으로 조회한다.
-        for (StoreOrderReqDTO.OrderItemDTO item : request.items().stream()
+        for (StoreOrderReqDTO.OrderItemDTO item : orderItems.stream()
                 .sorted(Comparator.comparing(StoreOrderReqDTO.OrderItemDTO::productId)).toList()) {
             TheaterStock stock = theaterStockRepository
                     .findByTheaterIdAndProductIdForUpdate(theaterId, item.productId())
@@ -120,7 +130,6 @@ public class StoreService {
                     .build());
         }
 
-        storeOrderRepository.save(order);
-        return StoreOrderResDTO.from(order, storeOrderItemRepository.saveAll(items));
+        return items;
     }
 }

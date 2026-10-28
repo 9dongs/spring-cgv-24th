@@ -21,7 +21,7 @@ public record StoreOrderResDTO(
                 order.getTheater().getId(),
                 order.getPurchasedAt(),
                 items.stream().map(OrderItemDTO::from).toList(),
-                items.stream().mapToLong(item -> (long) item.getUnitPrice() * item.getQuantity()).sum());
+                items.stream().mapToLong(StoreOrderItem::getTotalPrice).sum());
     }
 
     public record OrderItemDTO(

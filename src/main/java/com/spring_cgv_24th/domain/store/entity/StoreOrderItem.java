@@ -40,4 +40,8 @@ public class StoreOrderItem {
         this.quantity = quantity;
         this.unitPrice = product.getPrice();
     }
+
+    public long getTotalPrice() {
+        return (long) unitPrice * quantity;
+    }
 }

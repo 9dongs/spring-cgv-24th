@@ -38,8 +38,11 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class ReservationServiceTest {
@@ -65,13 +68,13 @@ class ReservationServiceTest {
 
     @Test
     void occupiedSeatCannotBeReservedAgain() {
-        Screening screening = mock(Screening.class);
-        when(screening.getId()).thenReturn(1L);
-        when(screening.getStartsAt()).thenReturn(NOW.plusHours(1));
+        Screening screening = screening(NOW.plusHours(1));
         ScreeningSeat seat = seat(screening);
         Reservation existing = Reservation.builder().member(mock(Member.class))
                 .screening(screening).totalPrice(14_000).build();
         seat.occupy(existing);
+        assertEquals(ErrorCode.SEAT_ALREADY_RESERVED,
+                assertThrows(CustomException.class, () -> seat.occupy(existing)).getErrorCode());
         when(screeningRepository.findById(1L)).thenReturn(Optional.of(screening));
         when(memberRepository.findById(MEMBER_ID)).thenReturn(Optional.of(mock(Member.class)));
         when(screeningSeatRepository.findByIdAndScreeningIdForUpdate(2L, 1L))
@@ -88,9 +91,7 @@ class ReservationServiceTest {
 
     @Test
     void reservationIsAllowedBeforeScreeningStarts() {
-        Screening screening = mock(Screening.class);
-        when(screening.getId()).thenReturn(1L);
-        when(screening.getStartsAt()).thenReturn(NOW.plusSeconds(1));
+        Screening screening = screening(NOW.plusSeconds(1));
         ScreeningSeat seat = seat(screening);
         Member member = mock(Member.class);
         when(screeningRepository.findById(1L)).thenReturn(Optional.of(screening));
@@ -113,8 +114,7 @@ class ReservationServiceTest {
 
     @Test
     void nonexistentMemberCannotReserve() {
-        Screening screening = mock(Screening.class);
-        when(screening.getStartsAt()).thenReturn(NOW.plusHours(1));
+        Screening screening = screening(NOW.plusHours(1));
         when(screeningRepository.findById(1L)).thenReturn(Optional.of(screening));
         when(memberRepository.findById(MEMBER_ID)).thenReturn(Optional.empty());
 
@@ -126,24 +126,10 @@ class ReservationServiceTest {
         verifyNoInteractions(screeningSeatRepository, reservationRepository, reservationSeatRepository);
     }
 
-    @Test
-    void reservationAtScreeningStartIsRejected() {
-        Screening screening = mock(Screening.class);
-        when(screening.getStartsAt()).thenReturn(NOW);
-        when(screeningRepository.findById(1L)).thenReturn(Optional.of(screening));
-
-        CustomException error = assertThrows(CustomException.class,
-                () -> reservationService.createReservation(MEMBER_ID,
-                        new ReservationReqDTO.CreateReservationDTO(1L, List.of(2L))));
-
-        assertEquals(ErrorCode.SCREENING_ALREADY_STARTED, error.getErrorCode());
-        verifyNoInteractions(screeningSeatRepository, reservationRepository, reservationSeatRepository);
-    }
-
-    @Test
-    void pastScreeningCannotBeReserved() {
-        Screening screening = mock(Screening.class);
-        when(screening.getStartsAt()).thenReturn(NOW.minusHours(3));
+    @ParameterizedTest
+    @ValueSource(ints = {0, -180})
+    void reservationAtOrAfterScreeningStartIsRejected(int minutesFromNow) {
+        Screening screening = screening(NOW.plusMinutes(minutesFromNow));
         when(screeningRepository.findById(1L)).thenReturn(Optional.of(screening));
 
         CustomException error = assertThrows(CustomException.class,
@@ -163,9 +149,7 @@ class ReservationServiceTest {
         ReservationService service = new ReservationService(
                 memberRepository, screeningRepository, screeningSeatRepository,
                 reservationRepository, reservationSeatRepository, advancingClock);
-        Screening screening = mock(Screening.class);
-        when(screening.getId()).thenReturn(1L);
-        when(screening.getStartsAt()).thenReturn(NOW);
+        Screening screening = screening(NOW);
         ScreeningSeat seat = seat(screening);
         when(screeningRepository.findById(1L)).thenReturn(Optional.of(screening));
         when(memberRepository.findById(MEMBER_ID)).thenReturn(Optional.of(mock(Member.class)));
@@ -182,9 +166,8 @@ class ReservationServiceTest {
     }
 
     @Test
-    void cancellationReleasesSeatsAndChangesStatus() {
-        Screening screening = mock(Screening.class);
-        when(screening.getStartsAt()).thenReturn(NOW.plusHours(1));
+    void cancellationReleasesSeatsAndRejectsRepeatedCancellation() {
+        Screening screening = screening(NOW.plusHours(1));
         Reservation reservation = Reservation.builder().member(owner()).screening(screening)
                 .totalPrice(28_000).build();
         ScreeningSeat first = seat(screening);
@@ -202,14 +185,16 @@ class ReservationServiceTest {
         assertEquals(ReservationStatus.CANCELLED, reservation.getStatus());
         assertEquals(NOW, reservation.getCancelledAt());
         assertEquals(28_000L, reservation.getTotalPrice());
+        assertEquals(ErrorCode.RESERVATION_ALREADY_CANCELLED,
+                assertThrows(CustomException.class,
+                        () -> reservationService.cancelReservation(1L, MEMBER_ID)).getErrorCode());
+        assertEquals(NOW, reservation.getCancelledAt());
         verifyNoInteractions(reservationSeatRepository);
     }
 
     @Test
     void cancellationKeepsSeatHistoryAndAllowsAnotherReservation() {
-        Screening screening = mock(Screening.class);
-        when(screening.getId()).thenReturn(1L);
-        when(screening.getStartsAt()).thenReturn(NOW.plusHours(1));
+        Screening screening = screening(NOW.plusHours(1));
         ScreeningSeat seat = seat(screening);
         Member member = owner();
         List<ReservationSeat> history = new ArrayList<>();
@@ -255,8 +240,7 @@ class ReservationServiceTest {
 
     @Test
     void cancellationAtScreeningStartIsRejectedWithoutReleasingSeats() {
-        Screening screening = mock(Screening.class);
-        when(screening.getStartsAt()).thenReturn(NOW);
+        Screening screening = screening(NOW);
         Reservation reservation = Reservation.builder().member(owner()).screening(screening)
                 .totalPrice(14_000).build();
         ScreeningSeat seat = seat(screening);
@@ -282,8 +266,7 @@ class ReservationServiceTest {
         ReservationService service = new ReservationService(
                 memberRepository, screeningRepository, screeningSeatRepository,
                 reservationRepository, reservationSeatRepository, advancingClock);
-        Screening screening = mock(Screening.class);
-        when(screening.getStartsAt()).thenReturn(NOW);
+        Screening screening = screening(NOW);
         Reservation reservation = Reservation.builder().member(owner()).screening(screening)
                 .totalPrice(14_000).build();
         ScreeningSeat seat = seat(screening);
@@ -303,7 +286,7 @@ class ReservationServiceTest {
     // 다른 회원이 취소를 시도해도 예매 상태와 좌석 점유가 그대로 유지된다.
     @Test
     void anotherMemberCannotCancelReservation() {
-        Screening screening = mock(Screening.class);
+        Screening screening = screening(NOW.plusHours(1));
         Reservation reservation = Reservation.builder().member(owner()).screening(screening)
                 .totalPrice(14_000).build();
         ScreeningSeat seat = seat(screening);
@@ -332,6 +315,12 @@ class ReservationServiceTest {
         assertEquals(ErrorCode.RESERVATION_FORBIDDEN, error.getErrorCode());
         verify(reservation, never()).cancel(any());
         verifyNoInteractions(screeningSeatRepository);
+    }
+
+    private static Screening screening(LocalDateTime startsAt) {
+        Screening screening = Screening.builder().startsAt(startsAt).endsAt(startsAt.plusHours(2)).build();
+        ReflectionTestUtils.setField(screening, "id", 1L);
+        return screening;
     }
 
     private static Member owner() {
