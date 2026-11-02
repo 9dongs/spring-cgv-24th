@@ -70,6 +70,21 @@ class TossPaymentGatewayTest {
         assertThat(gateway.find("payment-key").totalAmount()).isEqualTo(10_000);
     }
 
+    @Test
+    void fullCancellationSendsReasonAndStableIdempotencyKey() {
+        server.expect(requestTo("https://api.tosspayments.com/v1/payments/payment-key/cancel"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Idempotency-Key", "cancel-store-order"))
+                .andExpect(content().json("{\"cancelReason\":\"단순 변심\"}"))
+                .andRespond(withSuccess(RESPONSE.replace("\"DONE\"", "\"CANCELED\"")
+                        .replace("\"balanceAmount\":10000", "\"balanceAmount\":0"), MediaType.APPLICATION_JSON));
+
+        var result = gateway.cancel("payment-key", "단순 변심", "cancel-store-order");
+
+        assertThat(result.status()).isEqualTo("CANCELED");
+        assertThat(result.balanceAmount()).isZero();
+    }
+
     @ParameterizedTest
     @CsvSource({"403, REJECT_CARD_PAYMENT, true", "400, ALREADY_PROCESSED_PAYMENT, false",
             "409, IDEMPOTENT_REQUEST_PROCESSING, false", "500, UNKNOWN_PAYMENT_ERROR, false"})

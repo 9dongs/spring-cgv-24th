@@ -9,6 +9,8 @@ public interface PaymentGateway {
 
     Result find(String paymentKey);
 
+    Result cancel(String paymentKey, String cancelReason, String idempotencyKey);
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Result(String paymentKey, String orderId, String status, String currency,
                   long totalAmount, long balanceAmount, String method, OffsetDateTime approvedAt) {
