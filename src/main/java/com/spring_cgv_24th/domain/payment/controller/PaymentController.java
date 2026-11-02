@@ -1,5 +1,6 @@
 package com.spring_cgv_24th.domain.payment.controller;
 
+import com.spring_cgv_24th.domain.payment.dto.PaymentCancelReqDTO;
 import com.spring_cgv_24th.domain.payment.dto.PaymentReqDTO;
 import com.spring_cgv_24th.domain.payment.dto.PaymentResDTO;
 import com.spring_cgv_24th.domain.payment.enums.PaymentTargetType;
@@ -40,5 +41,15 @@ public class PaymentController {
             @Positive @PathVariable("targetId") Long targetId,
             @AuthenticationPrincipal CustomUserDetails principal) {
         return ApiResponse.onSuccess(paymentService.getPayment(principal.getMemberId(), targetType, targetId));
+    }
+
+    @Operation(summary = "결제 전체 취소")
+    @PostMapping("/cancel")
+    public ApiResponse<PaymentResDTO> cancel(
+            @PathVariable("targetType") PaymentTargetType targetType,
+            @Positive @PathVariable("targetId") Long targetId,
+            @Valid @RequestBody PaymentCancelReqDTO request,
+            @AuthenticationPrincipal CustomUserDetails principal) {
+        return ApiResponse.onSuccess(paymentService.cancel(principal.getMemberId(), targetType, targetId, request));
     }
 }

@@ -102,6 +102,13 @@ public class ReservationService {
         }
     }
 
+    @Transactional
+    public void cancelPaidReservation(Reservation reservation) {
+        List<ScreeningSeat> seats = screeningSeatRepository.findAllByReservationIdForUpdate(reservation.getId());
+        reservation.cancelPayment(LocalDateTime.now(clock));
+        seats.forEach(ScreeningSeat::release);
+    }
+
     private void validateSeatIds(List<Long> seatIds) {
         if (seatIds == null || seatIds.isEmpty() || seatIds.stream().anyMatch(id -> id == null || id <= 0)
                 || new HashSet<>(seatIds).size() != seatIds.size()) {

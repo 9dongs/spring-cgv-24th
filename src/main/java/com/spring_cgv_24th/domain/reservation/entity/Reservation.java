@@ -107,6 +107,18 @@ public class Reservation implements PaymentTarget {
         status = ReservationStatus.PAYMENT_FAILED;
     }
 
+    public void validatePaymentCancellation(LocalDateTime now) {
+        if (status != ReservationStatus.CONFIRMED) {
+            throw new CustomException(ErrorCode.PAYMENT_NOT_CANCELLABLE);
+        }
+        screening.validateCancellationTime(now);
+    }
+
+    public void cancelPayment(LocalDateTime now) {
+        cancelledAt = now;
+        status = ReservationStatus.CANCELLED;
+    }
+
     public boolean releaseSeats(LocalDateTime now) {
         if (status == ReservationStatus.PAYMENT_FAILED) {
             status = ReservationStatus.CANCELLED;

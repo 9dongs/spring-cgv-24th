@@ -10,4 +10,5 @@ public interface PaymentTarget {
     void beginPayment(LocalDateTime now);
     void completePayment();
     void failPayment();
+    void validatePaymentCancellation(LocalDateTime now);
 }

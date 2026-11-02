@@ -118,11 +118,20 @@ public class StoreService {
             if (!order.releaseStock(now)) {
                 continue;
             }
-            List<StoreOrderItem> items = storeOrderItemRepository.findAllByOrder_IdOrderByProduct_IdAsc(order.getId());
-            for (StoreOrderItem item : items) {
-                TheaterStock stock = lockStock(order.getTheater().getId(), item.getProduct().getId());
-                stock.addQuantity(item.getQuantity());
-            }
+            restoreStock(order);
+        }
+    }
+
+    @Transactional
+    public void cancelPaidOrder(StoreOrder order) {
+        order.cancelPayment();
+        restoreStock(order);
+    }
+
+    private void restoreStock(StoreOrder order) {
+        for (StoreOrderItem item : storeOrderItemRepository.findAllByOrder_IdOrderByProduct_IdAsc(order.getId())) {
+            TheaterStock stock = lockStock(order.getTheater().getId(), item.getProduct().getId());
+            stock.addQuantity(item.getQuantity());
         }
     }
 

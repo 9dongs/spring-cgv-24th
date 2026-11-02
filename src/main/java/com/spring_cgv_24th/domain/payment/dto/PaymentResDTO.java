@@ -14,11 +14,12 @@ public record PaymentResDTO(
         long amount,
         long balanceAmount,
         String method,
-        Instant approvedAt
+        Instant approvedAt,
+        String cancelReason
 ) {
     public static PaymentResDTO from(Payment payment) {
         return new PaymentResDTO(payment.getTargetType(), payment.getTargetId(), payment.getPaymentOrderId(),
                 payment.getPaymentKey(), payment.getStatus(), payment.getAmount(), payment.getBalanceAmount(),
-                payment.getMethod(), payment.getApprovedAt());
+                payment.getMethod(), payment.getApprovedAt(), payment.getCancelReason());
     }
 }

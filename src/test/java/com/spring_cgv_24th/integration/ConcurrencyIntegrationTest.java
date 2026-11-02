@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.spring_cgv_24th.domain.payment.dto.PaymentCancelReqDTO;
 import com.spring_cgv_24th.domain.payment.dto.PaymentReqDTO;
 import com.spring_cgv_24th.domain.payment.enums.PaymentStatus;
 import com.spring_cgv_24th.domain.payment.enums.PaymentTargetType;
@@ -52,6 +53,7 @@ class ConcurrencyIntegrationTest {
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 30, 12, 0);
     private static final ZoneId ZONE = ZoneId.of("Asia/Seoul");
+    private static final PaymentCancelReqDTO CANCEL_REQUEST = new PaymentCancelReqDTO("단순 변심");
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ReservationService reservationService;
@@ -308,6 +310,80 @@ class ConcurrencyIntegrationTest {
         assertThat(targetStatus(reservation)).isEqualTo("CONFIRMED");
         assertResources(order, true);
         assertResources(reservation, true);
+    }
+
+    @ParameterizedTest
+    @EnumSource(PaymentTargetType.class)
+    void fullCancellationRestoresResourcesOnlyOnce(PaymentTargetType type) throws Exception {
+        Target target = paymentTarget(type);
+        assertThat(assertThrows(CustomException.class,
+                () -> paymentService.cancel(memberId + 1, type, target.id(), CANCEL_REQUEST)).getErrorCode())
+                .isEqualTo(ErrorCode.PAYMENT_FORBIDDEN);
+        assertThat(assertThrows(CustomException.class,
+                () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST)).getErrorCode())
+                .isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
+        when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenReturn(approved(target, target.amount()));
+        paymentService.confirm(memberId, type, target.id(), paymentRequest(target));
+        when(gateway.cancel(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertResources(target, true);
+            when(clock.instant()).thenReturn(NOW.plusDays(1).atZone(ZONE).toInstant());
+            return cancelled(target);
+        });
+
+        var results = runTogether(10, () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST));
+
+        assertThat(results.stream().filter(Objects::isNull).count()).isGreaterThanOrEqualTo(1);
+        assertThat(results.stream().filter(Objects::nonNull)).containsOnly(ErrorCode.PAYMENT_PENDING);
+        assertThat(paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST).status()).isEqualTo(PaymentStatus.CANCELLED);
+        assertThat(paymentService.getPayment(memberId, type, target.id()).balanceAmount()).isZero();
+        assertThat(targetStatus(target)).isEqualTo("CANCELLED");
+        assertResources(target, false);
+        verify(gateway, times(1)).cancel("payment-key", "단순 변심", "cancel-" + target.orderId());
+        assertThat(assertThrows(CustomException.class,
+                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target))).getErrorCode())
+                .isEqualTo(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE);
+    }
+
+    @Test
+    void cancellationRetryReusesTheOriginalReasonAndIdempotencyKey() {
+        Target target = paidTarget(PaymentTargetType.STORE_ORDER);
+        when(gateway.cancel(anyString(), anyString(), anyString()))
+                .thenThrow(new PaymentGateway.Failure(false)).thenReturn(cancelled(target));
+        assertThrows(CustomException.class, () -> paymentService.cancel(memberId, target.type(), target.id(), CANCEL_REQUEST));
+        assertResources(target, true);
+
+        var result = paymentService.cancel(memberId, target.type(), target.id(), new PaymentCancelReqDTO("재요청"));
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.CANCELLED);
+        assertThat(result.cancelReason()).isEqualTo("단순 변심");
+        assertResources(target, false);
+        verify(gateway, times(2)).cancel("payment-key", "단순 변심", "cancel-" + target.orderId());
+    }
+
+    @Test
+    void paidReservationCannotBeCancelledAfterScreeningStarts() {
+        Target target = paidTarget(PaymentTargetType.RESERVATION);
+        when(clock.instant()).thenReturn(NOW.plusDays(1).atZone(ZONE).toInstant());
+
+        assertThat(assertThrows(CustomException.class,
+                () -> paymentService.cancel(memberId, target.type(), target.id(), CANCEL_REQUEST)).getErrorCode())
+                .isEqualTo(ErrorCode.RESERVATION_CANCELLATION_CLOSED);
+
+        assertResources(target, true);
+        verify(gateway, never()).cancel(anyString(), anyString(), anyString());
+    }
+
+    private Target paidTarget(PaymentTargetType type) {
+        Target target = paymentTarget(type);
+        when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenReturn(approved(target, target.amount()));
+        paymentService.confirm(memberId, type, target.id(), paymentRequest(target));
+        return target;
+    }
+
+    private PaymentGateway.Result cancelled(Target target) {
+        return new PaymentGateway.Result("payment-key", target.orderId(), "CANCELED", "KRW", target.amount(), 0,
+                "카드", NOW.atZone(ZONE).toOffsetDateTime());
     }
 
     private Target paymentTarget(PaymentTargetType type) {

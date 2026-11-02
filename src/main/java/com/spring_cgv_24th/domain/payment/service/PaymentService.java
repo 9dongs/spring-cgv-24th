@@ -1,5 +1,6 @@
 package com.spring_cgv_24th.domain.payment.service;
 
+import com.spring_cgv_24th.domain.payment.dto.PaymentCancelReqDTO;
 import com.spring_cgv_24th.domain.payment.dto.PaymentReqDTO;
 import com.spring_cgv_24th.domain.payment.dto.PaymentResDTO;
 import com.spring_cgv_24th.domain.payment.entity.Payment;
@@ -10,9 +11,12 @@ import com.spring_cgv_24th.domain.payment.repository.PaymentRepository;
 import com.spring_cgv_24th.domain.payment.target.PaymentTarget;
 import com.spring_cgv_24th.domain.reservation.entity.Reservation;
 import com.spring_cgv_24th.domain.reservation.repository.ReservationRepository;
+import com.spring_cgv_24th.domain.reservation.service.ReservationService;
+import com.spring_cgv_24th.domain.store.entity.StoreOrder;
 import com.spring_cgv_24th.domain.store.entity.StoreOrderItem;
 import com.spring_cgv_24th.domain.store.repository.StoreOrderItemRepository;
 import com.spring_cgv_24th.domain.store.repository.StoreOrderRepository;
+import com.spring_cgv_24th.domain.store.service.StoreService;
 import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
 import java.time.Clock;
@@ -38,17 +42,22 @@ public class PaymentService {
     private final ReservationRepository reservationRepository;
     private final PaymentRepository paymentRepository;
     private final PaymentGateway gateway;
+    private final StoreService storeService;
+    private final ReservationService reservationService;
     private final Clock clock;
     private final TransactionTemplate transaction;
 
     public PaymentService(StoreOrderRepository orderRepository, StoreOrderItemRepository itemRepository,
                           ReservationRepository reservationRepository, PaymentRepository paymentRepository,
-                          PaymentGateway gateway, Clock clock, PlatformTransactionManager transactionManager) {
+                          PaymentGateway gateway, StoreService storeService, ReservationService reservationService,
+                          Clock clock, PlatformTransactionManager transactionManager) {
         this.orderRepository = orderRepository;
         this.itemRepository = itemRepository;
         this.reservationRepository = reservationRepository;
         this.paymentRepository = paymentRepository;
         this.gateway = gateway;
+        this.storeService = storeService;
+        this.reservationService = reservationService;
         this.clock = clock;
         this.transaction = new TransactionTemplate(transactionManager);
     }
@@ -99,6 +108,36 @@ public class PaymentService {
         return refreshPayment(current);
     }
 
+    public PaymentResDTO cancel(Long memberId, PaymentTargetType type, Long targetId, PaymentCancelReqDTO request) {
+        PaymentResDTO current = transaction.execute(status -> {
+            PaymentTarget target = findTarget(type, targetId, true);
+            validateOwner(target, memberId);
+            Payment payment = requirePayment(type, targetId);
+            if (payment.getStatus() == PaymentStatus.CANCELLED) return PaymentResDTO.from(payment);
+            if (payment.getStatus() == PaymentStatus.CANCEL_PROCESSING) throw new CustomException(ErrorCode.PAYMENT_PENDING);
+            if (payment.getStatus() != PaymentStatus.COMPLETED && payment.getStatus() != PaymentStatus.CANCEL_UNKNOWN) {
+                throw new CustomException(ErrorCode.PAYMENT_NOT_CANCELLABLE);
+            }
+            // 취소 가능 시각은 최초 요청에서 검사하고, 재시도는 접수된 취소를 이어간다.
+            if (payment.getStatus() == PaymentStatus.COMPLETED) {
+                target.validatePaymentCancellation(LocalDateTime.now(clock));
+            }
+            payment.beginCancellation(request.cancelReason());
+            return PaymentResDTO.from(payment);
+        });
+        if (current.status() == PaymentStatus.CANCELLED) return current;
+
+        PaymentResDTO result;
+        try {
+            result = applyResult(current, gateway.cancel(current.paymentKey(), current.cancelReason(),
+                    "cancel-" + current.paymentOrderId()));
+        } catch (PaymentGateway.Failure failure) {
+            result = handleFailure(current, false);
+        }
+        if (result.status() != PaymentStatus.CANCELLED) throw new CustomException(ErrorCode.PAYMENT_PENDING);
+        return result;
+    }
+
     public void recoverUnresolvedPayments() {
         List<PaymentResDTO> payments = transaction.execute(status -> paymentRepository.findUnresolvedPayments(
                         List.of(PaymentStatus.PROCESSING, PaymentStatus.UNKNOWN), LocalDateTime.now(clock))
@@ -114,7 +153,7 @@ public class PaymentService {
     }
 
     private PaymentResDTO refreshPayment(PaymentResDTO current) {
-        if (current.status() == PaymentStatus.COMPLETED || current.status() == PaymentStatus.FAILED) return current;
+        if (current.status().isTerminal()) return current;
         try {
             return applyResult(current, gateway.find(current.paymentKey()));
         } catch (PaymentGateway.Failure failure) {
@@ -135,6 +174,9 @@ public class PaymentService {
         if (existing != null) {
             if (existing.getStatus() == PaymentStatus.PROCESSING) throw new CustomException(ErrorCode.PAYMENT_PENDING);
             if (existing.getStatus() == PaymentStatus.FAILED) throw new CustomException(ErrorCode.PAYMENT_CONFIRMATION_FAILED);
+            if (existing.getStatus() != PaymentStatus.COMPLETED && existing.getStatus() != PaymentStatus.UNKNOWN) {
+                throw new CustomException(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE);
+            }
             return new Prepared(PaymentResDTO.from(existing), false);
         }
         if (paymentRepository.existsByPaymentKey(request.paymentKey())) {
@@ -154,10 +196,23 @@ public class PaymentService {
     private PaymentResDTO applyResult(PaymentResDTO current, PaymentGateway.Result response) {
         if (!matches(current, response)) {
             PaymentResDTO result = update(current, (target, payment) -> payment.markUnknown());
-            if (result.status() == PaymentStatus.COMPLETED || result.status() == PaymentStatus.FAILED) return result;
+            if (result.status().isTerminal()) return result;
             throw new CustomException(ErrorCode.PAYMENT_GATEWAY_ERROR);
         }
         return update(current, (target, payment) -> {
+            if (payment.getStatus().isCancellationPending()) {
+                if ("CANCELED".equals(response.status())) {
+                    if (target instanceof Reservation reservation) {
+                        reservationService.cancelPaidReservation(reservation);
+                    } else {
+                        storeService.cancelPaidOrder((StoreOrder) target);
+                    }
+                    payment.cancel();
+                } else {
+                    payment.markUnknown();
+                }
+                return;
+            }
             switch (response.status()) {
                 case "DONE" -> {
                     payment.complete(response.method(), response.approvedAt().toInstant(), response.balanceAmount());
@@ -178,6 +233,7 @@ public class PaymentService {
                 && payment.amount() == response.totalAmount() && "KRW".equals(response.currency())
                 && response.status() != null && response.balanceAmount() >= 0
                 && response.balanceAmount() <= payment.amount()
+                && (!"CANCELED".equals(response.status()) || response.balanceAmount() == 0)
                 && (!"DONE".equals(response.status()) || (response.approvedAt() != null && response.method() != null));
     }
 
@@ -190,7 +246,7 @@ public class PaymentService {
                 payment.markUnknown();
             }
         });
-        if (result.status() == PaymentStatus.COMPLETED || result.status() == PaymentStatus.FAILED) return result;
+        if (result.status().isTerminal()) return result;
         throw new CustomException(ErrorCode.PAYMENT_GATEWAY_ERROR);
     }
 
@@ -198,7 +254,10 @@ public class PaymentService {
         return transaction.execute(status -> {
             PaymentTarget target = findTarget(current.targetType(), current.targetId(), true);
             Payment payment = requirePayment(current.targetType(), current.targetId());
-            if (!payment.isTerminal()) change.accept(target, payment);
+            if (!payment.isTerminal()
+                    && payment.getStatus().isCancellationPending() == current.status().isCancellationPending()) {
+                change.accept(target, payment);
+            }
             return PaymentResDTO.from(payment);
         });
     }

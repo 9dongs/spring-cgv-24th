@@ -45,6 +45,9 @@ public class Payment {
     private Instant approvedAt;
     private long balanceAmount;
 
+    @Column(length = 200)
+    private String cancelReason;
+
     public Payment(PaymentTargetType targetType, PaymentTarget target, String paymentKey, long amount) {
         this.targetType = targetType;
         this.targetId = target.getId();
@@ -55,7 +58,7 @@ public class Payment {
     }
 
     public boolean isTerminal() {
-        return status == PaymentStatus.COMPLETED || status == PaymentStatus.FAILED;
+        return status.isTerminal();
     }
 
     public void complete(String method, Instant approvedAt, long balanceAmount) {
@@ -70,6 +73,16 @@ public class Payment {
     }
 
     public void markUnknown() {
-        status = PaymentStatus.UNKNOWN;
+        status = status.isCancellationPending() ? PaymentStatus.CANCEL_UNKNOWN : PaymentStatus.UNKNOWN;
+    }
+
+    public void beginCancellation(String reason) {
+        if (cancelReason == null) cancelReason = reason;
+        status = PaymentStatus.CANCEL_PROCESSING;
+    }
+
+    public void cancel() {
+        status = PaymentStatus.CANCELLED;
+        balanceAmount = 0;
     }
 }

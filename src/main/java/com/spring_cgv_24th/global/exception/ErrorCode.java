@@ -68,6 +68,7 @@ public enum ErrorCode {
     PAYMENT_FORBIDDEN(HttpStatus.FORBIDDEN, "PAYMENT403", "본인의 결제만 처리하거나 조회할 수 있습니다."),
     PAYMENT_TARGET_NOT_PAYABLE(HttpStatus.CONFLICT, "PAYMENT_TARGET409", "결제할 수 없는 상태이거나 기한이 지났습니다."),
     PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "PAYMENT404", "결제 정보를 찾을 수 없습니다."),
+    PAYMENT_NOT_CANCELLABLE(HttpStatus.CONFLICT, "PAYMENT_CANCEL409", "승인 완료된 결제만 취소할 수 있습니다."),
     PAYMENT_AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "PAYMENT_AMOUNT400", "결제 금액이 일치하지 않습니다."),
     PAYMENT_REQUEST_CONFLICT(HttpStatus.CONFLICT, "PAYMENT_REQUEST409", "주문번호 또는 결제 키가 일치하지 않습니다."),
     PAYMENT_PENDING(HttpStatus.CONFLICT, "PAYMENT_PENDING409", "결제 조회로 처리 결과를 확인해주세요."),

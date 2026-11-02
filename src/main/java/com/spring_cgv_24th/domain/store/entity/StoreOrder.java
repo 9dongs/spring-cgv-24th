@@ -73,6 +73,16 @@ public class StoreOrder implements PaymentTarget {
         status = StoreOrderStatus.PAYMENT_FAILED;
     }
 
+    public void validatePaymentCancellation(LocalDateTime now) {
+        if (status != StoreOrderStatus.COMPLETED) {
+            throw new CustomException(ErrorCode.PAYMENT_NOT_CANCELLABLE);
+        }
+    }
+
+    public void cancelPayment() {
+        status = StoreOrderStatus.CANCELLED;
+    }
+
     public boolean releaseStock(LocalDateTime now) {
         if (status == StoreOrderStatus.PAYMENT_FAILED) {
             status = StoreOrderStatus.CANCELLED;

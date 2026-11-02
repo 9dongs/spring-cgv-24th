@@ -4,5 +4,16 @@ public enum PaymentStatus {
     PROCESSING,
     UNKNOWN,
     COMPLETED,
-    FAILED
+    FAILED,
+    CANCEL_PROCESSING,
+    CANCEL_UNKNOWN,
+    CANCELLED;
+
+    public boolean isTerminal() {
+        return this == COMPLETED || this == FAILED || this == CANCELLED;
+    }
+
+    public boolean isCancellationPending() {
+        return this == CANCEL_PROCESSING || this == CANCEL_UNKNOWN;
+    }
 }
