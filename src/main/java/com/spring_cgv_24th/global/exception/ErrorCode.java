@@ -61,7 +61,10 @@ public enum ErrorCode {
     // 매점
     PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "PRODUCT404", "매점 상품을 찾을 수 없습니다."),
     THEATER_STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "THEATER_STOCK404", "영화관의 상품 재고를 찾을 수 없습니다."),
-    STORE_STOCK_INSUFFICIENT(HttpStatus.CONFLICT, "STORE_STOCK409", "구매 가능한 재고가 부족합니다.");
+    STORE_STOCK_INSUFFICIENT(HttpStatus.CONFLICT, "STORE_STOCK409", "구매 가능한 재고가 부족합니다."),
+
+    // 결제
+    PAYMENT_TARGET_NOT_PAYABLE(HttpStatus.CONFLICT, "PAYMENT_TARGET409", "결제할 수 없는 상태이거나 기한이 지났습니다.");
     private final HttpStatus httpStatus;
     private final String code;
     private final String message;

@@ -1,11 +1,15 @@
 package com.spring_cgv_24th.domain.store.entity;
 
 import com.spring_cgv_24th.domain.member.entity.Member;
+import com.spring_cgv_24th.domain.payment.target.PaymentTarget;
 import com.spring_cgv_24th.domain.store.enums.StoreOrderStatus;
 import com.spring_cgv_24th.domain.theater.entity.Theater;
+import com.spring_cgv_24th.global.exception.CustomException;
+import com.spring_cgv_24th.global.exception.ErrorCode;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -15,7 +19,7 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(name = "store_order", indexes = @Index(name = "idx_store_order_expiration", columnList = "status, expires_at"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class StoreOrder {
+public class StoreOrder implements PaymentTarget {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -41,6 +45,9 @@ public class StoreOrder {
     @Column(name = "expires_at", updatable = false, columnDefinition = "timestamp(6)")
     private LocalDateTime expiresAt;
 
+    @Column(name = "payment_order_id", unique = true, updatable = false, length = 64)
+    private String paymentOrderId;
+
     @Builder
     public StoreOrder(Member member, Theater theater, LocalDateTime purchasedAt) {
         this.member = member;
@@ -48,6 +55,22 @@ public class StoreOrder {
         this.purchasedAt = purchasedAt;
         this.status = StoreOrderStatus.PENDING_PAYMENT;
         this.expiresAt = purchasedAt.plusMinutes(10);
+        this.paymentOrderId = UUID.randomUUID().toString();
+    }
+
+    public void beginPayment(LocalDateTime now) {
+        if (status != StoreOrderStatus.PENDING_PAYMENT || !now.isBefore(expiresAt)) {
+            throw new CustomException(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE);
+        }
+        status = StoreOrderStatus.PAYMENT_PROCESSING;
+    }
+
+    public void completePayment() {
+        status = StoreOrderStatus.COMPLETED;
+    }
+
+    public void failPayment() {
+        status = StoreOrderStatus.PAYMENT_FAILED;
     }
 
     public boolean expire(LocalDateTime now) {

@@ -14,7 +14,8 @@ public record StoreOrderResDTO(
         List<OrderItemDTO> items,
         long totalPrice,
         StoreOrderStatus status,
-        LocalDateTime expiresAt
+        LocalDateTime expiresAt,
+        String paymentOrderId
 ) {
 
     public static StoreOrderResDTO from(StoreOrder order, List<StoreOrderItem> items) {
@@ -26,7 +27,8 @@ public record StoreOrderResDTO(
                 items.stream().map(OrderItemDTO::from).toList(),
                 items.stream().mapToLong(StoreOrderItem::getTotalPrice).sum(),
                 order.getStatus(),
-                order.getExpiresAt());
+                order.getExpiresAt(),
+                order.getPaymentOrderId());
     }
 
     public record OrderItemDTO(
