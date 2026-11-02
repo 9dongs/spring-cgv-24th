@@ -4,13 +4,14 @@ public enum PaymentStatus {
     PROCESSING,
     UNKNOWN,
     COMPLETED,
+    PARTIALLY_CANCELLED,
     FAILED,
     CANCEL_PROCESSING,
     CANCEL_UNKNOWN,
     CANCELLED;
 
     public boolean isTerminal() {
-        return this == COMPLETED || this == FAILED || this == CANCELLED;
+        return this == COMPLETED || this == PARTIALLY_CANCELLED || this == FAILED || this == CANCELLED;
     }
 
     public boolean isCancellationPending() {

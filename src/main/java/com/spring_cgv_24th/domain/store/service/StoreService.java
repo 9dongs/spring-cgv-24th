@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -123,9 +124,33 @@ public class StoreService {
     }
 
     @Transactional
-    public void cancelPaidOrder(StoreOrder order) {
-        order.cancelPayment();
-        restoreStock(order);
+    public void cancelPaidOrder(StoreOrder order, Map<Long, Integer> quantities, boolean fullyCancelled) {
+        for (StoreOrderItem item : storeOrderItemRepository.findAllByOrder_IdOrderByProduct_IdAsc(order.getId())) {
+            int quantity = quantities.isEmpty() ? item.getRemainingQuantity()
+                    : quantities.getOrDefault(item.getProduct().getId(), 0);
+            if (quantity == 0) continue;
+            lockStock(order.getTheater().getId(), item.getProduct().getId()).addQuantity(quantity);
+            item.cancelQuantity(quantity);
+        }
+        if (fullyCancelled) order.cancelPayment();
+        else order.partiallyCancelPayment();
+    }
+
+    public long calculateCancellationAmount(StoreOrder order, Map<Long, Integer> quantities) {
+        List<StoreOrderItem> items = storeOrderItemRepository.findAllByOrder_IdOrderByProduct_IdAsc(order.getId());
+        long amount = 0;
+        int matched = 0;
+        for (StoreOrderItem item : items) {
+            Integer quantity = quantities.get(item.getProduct().getId());
+            if (quantity == null) continue;
+            if (quantity <= 0 || quantity > item.getRemainingQuantity()) {
+                throw new CustomException(ErrorCode.PAYMENT_CANCEL_INVALID);
+            }
+            amount += (long) item.getUnitPrice() * quantity;
+            matched++;
+        }
+        if (matched != quantities.size()) throw new CustomException(ErrorCode.PAYMENT_CANCEL_INVALID);
+        return amount;
     }
 
     private void restoreStock(StoreOrder order) {

@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -103,10 +104,27 @@ public class ReservationService {
     }
 
     @Transactional
-    public void cancelPaidReservation(Reservation reservation) {
+    public void cancelPaidReservation(Reservation reservation, Map<Long, Integer> quantities, boolean fullyCancelled) {
         List<ScreeningSeat> seats = screeningSeatRepository.findAllByReservationIdForUpdate(reservation.getId());
-        reservation.cancelPayment(LocalDateTime.now(clock));
-        seats.forEach(ScreeningSeat::release);
+        for (ReservationSeat item : reservationSeatRepository
+                .findAllByReservation_IdOrderByScreeningSeat_IdAsc(reservation.getId())) {
+            if (item.isCancelled() || (!quantities.isEmpty() && !quantities.containsKey(item.getScreeningSeat().getId()))) {
+                continue;
+            }
+            item.cancel();
+            seats.stream().filter(seat -> seat.getId().equals(item.getScreeningSeat().getId()))
+                    .forEach(ScreeningSeat::release);
+        }
+        if (fullyCancelled) reservation.cancelPayment(LocalDateTime.now(clock));
+        else reservation.partiallyCancelPayment();
+    }
+
+    public long calculateCancellationAmount(Reservation reservation, Map<Long, Integer> quantities) {
+        List<ReservationSeat> seats = reservationSeatRepository
+                .findAllByReservation_IdOrderByScreeningSeat_IdAsc(reservation.getId()).stream()
+                .filter(seat -> quantities.containsKey(seat.getScreeningSeat().getId()) && !seat.isCancelled()).toList();
+        if (seats.size() != quantities.size()) throw new CustomException(ErrorCode.PAYMENT_CANCEL_INVALID);
+        return seats.stream().mapToLong(ReservationSeat::getPrice).sum();
     }
 
     private void validateSeatIds(List<Long> seatIds) {

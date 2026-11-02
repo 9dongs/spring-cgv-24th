@@ -1,6 +1,7 @@
 package com.spring_cgv_24th.domain.payment.controller;
 
 import com.spring_cgv_24th.domain.payment.dto.PaymentCancelReqDTO;
+import com.spring_cgv_24th.domain.payment.dto.PaymentPartialCancelReqDTO;
 import com.spring_cgv_24th.domain.payment.dto.PaymentReqDTO;
 import com.spring_cgv_24th.domain.payment.dto.PaymentResDTO;
 import com.spring_cgv_24th.domain.payment.enums.PaymentTargetType;
@@ -51,5 +52,15 @@ public class PaymentController {
             @Valid @RequestBody PaymentCancelReqDTO request,
             @AuthenticationPrincipal CustomUserDetails principal) {
         return ApiResponse.onSuccess(paymentService.cancel(principal.getMemberId(), targetType, targetId, request));
+    }
+
+    @Operation(summary = "결제 부분 취소", description = "매점은 items의 상품·수량, 예매는 screeningSeatIds를 지정합니다. 재시도에는 같은 requestId를 사용합니다.")
+    @PostMapping("/cancel/partial")
+    public ApiResponse<PaymentResDTO> cancelPartially(
+            @PathVariable("targetType") PaymentTargetType targetType,
+            @Positive @PathVariable("targetId") Long targetId,
+            @Valid @RequestBody PaymentPartialCancelReqDTO request,
+            @AuthenticationPrincipal CustomUserDetails principal) {
+        return ApiResponse.onSuccess(paymentService.cancelPartially(principal.getMemberId(), targetType, targetId, request));
     }
 }

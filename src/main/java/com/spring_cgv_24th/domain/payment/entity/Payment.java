@@ -5,9 +5,13 @@ import com.spring_cgv_24th.domain.payment.enums.PaymentTargetType;
 import com.spring_cgv_24th.domain.payment.target.PaymentTarget;
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Getter
 @Entity
@@ -38,7 +42,8 @@ public class Payment {
     private long amount;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(nullable = false, length = 30)
     private PaymentStatus status;
 
     private String method;
@@ -47,6 +52,10 @@ public class Payment {
 
     @Column(length = 200)
     private String cancelReason;
+
+    @OneToMany(mappedBy = "payment", cascade = CascadeType.ALL)
+    @OrderBy("id ASC")
+    private List<PaymentCancellation> cancellations = new ArrayList<>();
 
     public Payment(PaymentTargetType targetType, PaymentTarget target, String paymentKey, long amount) {
         this.targetType = targetType;
@@ -77,12 +86,20 @@ public class Payment {
     }
 
     public void beginCancellation(String reason) {
-        if (cancelReason == null) cancelReason = reason;
+        cancelReason = reason;
         status = PaymentStatus.CANCEL_PROCESSING;
     }
 
-    public void cancel() {
-        status = PaymentStatus.CANCELLED;
-        balanceAmount = 0;
+    public void cancel(long balanceAmount) {
+        status = balanceAmount == 0 ? PaymentStatus.CANCELLED : PaymentStatus.PARTIALLY_CANCELLED;
+        this.balanceAmount = balanceAmount;
+    }
+
+    public void addCancellation(PaymentCancellation cancellation) {
+        cancellations.add(cancellation);
+    }
+
+    public PaymentCancellation getLatestCancellation() {
+        return cancellations.isEmpty() ? null : cancellations.getLast();
     }
 }

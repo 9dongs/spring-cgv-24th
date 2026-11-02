@@ -74,13 +74,17 @@ public class StoreOrder implements PaymentTarget {
     }
 
     public void validatePaymentCancellation(LocalDateTime now) {
-        if (status != StoreOrderStatus.COMPLETED) {
+        if (status != StoreOrderStatus.COMPLETED && status != StoreOrderStatus.PARTIALLY_CANCELLED) {
             throw new CustomException(ErrorCode.PAYMENT_NOT_CANCELLABLE);
         }
     }
 
     public void cancelPayment() {
         status = StoreOrderStatus.CANCELLED;
+    }
+
+    public void partiallyCancelPayment() {
+        status = StoreOrderStatus.PARTIALLY_CANCELLED;
     }
 
     public boolean releaseStock(LocalDateTime now) {

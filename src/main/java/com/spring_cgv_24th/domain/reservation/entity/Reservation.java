@@ -79,6 +79,7 @@ public class Reservation implements PaymentTarget {
             throw new CustomException(ErrorCode.RESERVATION_ALREADY_CANCELLED);
         }
         if (status == ReservationStatus.PAYMENT_PROCESSING
+                || status == ReservationStatus.PARTIALLY_CANCELLED
                 || (status == ReservationStatus.CONFIRMED && paymentOrderId != null)) {
             throw new CustomException(ErrorCode.RESERVATION_PAYMENT_CANCELLATION_REQUIRED);
         }
@@ -108,7 +109,7 @@ public class Reservation implements PaymentTarget {
     }
 
     public void validatePaymentCancellation(LocalDateTime now) {
-        if (status != ReservationStatus.CONFIRMED) {
+        if (status != ReservationStatus.CONFIRMED && status != ReservationStatus.PARTIALLY_CANCELLED) {
             throw new CustomException(ErrorCode.PAYMENT_NOT_CANCELLABLE);
         }
         screening.validateCancellationTime(now);
@@ -117,6 +118,10 @@ public class Reservation implements PaymentTarget {
     public void cancelPayment(LocalDateTime now) {
         cancelledAt = now;
         status = ReservationStatus.CANCELLED;
+    }
+
+    public void partiallyCancelPayment() {
+        status = ReservationStatus.PARTIALLY_CANCELLED;
     }
 
     public boolean releaseSeats(LocalDateTime now) {
