@@ -37,10 +37,19 @@ public class TossPaymentGateway implements PaymentGateway {
 
     @Override
     public Result cancel(String paymentKey, String cancelReason, String idempotencyKey) {
+        return cancel(paymentKey, new CancelBody(cancelReason), idempotencyKey);
+    }
+
+    @Override
+    public Result cancel(String paymentKey, String cancelReason, long cancelAmount, String idempotencyKey) {
+        return cancel(paymentKey, new PartialCancelBody(cancelReason, cancelAmount), idempotencyKey);
+    }
+
+    private Result cancel(String paymentKey, Object body, String idempotencyKey) {
         return execute(() -> client.post().uri("/v1/payments/{paymentKey}/cancel", paymentKey)
                 .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(new CancelBody(cancelReason))
+                .body(body)
                 .retrieve().body(Result.class));
     }
 
@@ -66,6 +75,9 @@ public class TossPaymentGateway implements PaymentGateway {
     }
 
     private record CancelBody(String cancelReason) {
+    }
+
+    private record PartialCancelBody(String cancelReason, long cancelAmount) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

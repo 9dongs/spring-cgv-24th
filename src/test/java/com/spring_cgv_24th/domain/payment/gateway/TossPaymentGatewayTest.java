@@ -85,6 +85,19 @@ class TossPaymentGatewayTest {
         assertThat(result.balanceAmount()).isZero();
     }
 
+    @Test
+    void partialCancellationSendsAmountAndItsOwnIdempotencyKey() {
+        server.expect(requestTo("https://api.tosspayments.com/v1/payments/payment-key/cancel"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Idempotency-Key", "cancel-request-1"))
+                .andExpect(content().json("{\"cancelReason\":\"상품 일부 취소\",\"cancelAmount\":3000}"))
+                .andRespond(withSuccess(RESPONSE.replace("\"DONE\"", "\"PARTIAL_CANCELED\"")
+                        .replace("\"balanceAmount\":10000", "\"balanceAmount\":7000"), MediaType.APPLICATION_JSON));
+
+        assertThat(gateway.cancel("payment-key", "상품 일부 취소", 3000, "cancel-request-1").balanceAmount())
+                .isEqualTo(7000);
+    }
+
     @ParameterizedTest
     @CsvSource({"403, REJECT_CARD_PAYMENT, true", "400, ALREADY_PROCESSED_PAYMENT, false",
             "409, IDEMPOTENT_REQUEST_PROCESSING, false", "500, UNKNOWN_PAYMENT_ERROR, false"})
