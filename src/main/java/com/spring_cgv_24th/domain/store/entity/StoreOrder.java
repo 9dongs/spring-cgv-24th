@@ -73,7 +73,11 @@ public class StoreOrder implements PaymentTarget {
         status = StoreOrderStatus.PAYMENT_FAILED;
     }
 
-    public boolean expire(LocalDateTime now) {
+    public boolean releaseStock(LocalDateTime now) {
+        if (status == StoreOrderStatus.PAYMENT_FAILED) {
+            status = StoreOrderStatus.CANCELLED;
+            return true;
+        }
         if (status != StoreOrderStatus.PENDING_PAYMENT || now.isBefore(expiresAt)) {
             return false;
         }

@@ -107,4 +107,15 @@ public class Reservation implements PaymentTarget {
         status = ReservationStatus.PAYMENT_FAILED;
     }
 
+    public boolean releaseSeats(LocalDateTime now) {
+        if (status == ReservationStatus.PAYMENT_FAILED) {
+            status = ReservationStatus.CANCELLED;
+        } else if (status == ReservationStatus.PENDING_PAYMENT && !now.isBefore(expiresAt)) {
+            status = ReservationStatus.EXPIRED;
+        } else {
+            return false;
+        }
+        cancelledAt = now;
+        return true;
+    }
 }

@@ -110,12 +110,12 @@ public class StoreService {
     }
 
     @Transactional
-    public void expirePendingOrders() {
+    public void releaseUnpaidOrderStock() {
         LocalDateTime now = LocalDateTime.now(clock);
         List<StoreOrder> orders = storeOrderRepository
-                .findExpiredOrdersForUpdate(StoreOrderStatus.PENDING_PAYMENT, now);
+                .findOrdersForStockReleaseForUpdate(StoreOrderStatus.PENDING_PAYMENT, StoreOrderStatus.PAYMENT_FAILED, now);
         for (StoreOrder order : orders) {
-            if (!order.expire(now)) {
+            if (!order.releaseStock(now)) {
                 continue;
             }
             List<StoreOrderItem> items = storeOrderItemRepository.findAllByOrder_IdOrderByProduct_IdAsc(order.getId());

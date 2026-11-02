@@ -3,6 +3,7 @@ package com.spring_cgv_24th.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
+import com.spring_cgv_24th.domain.payment.enums.PaymentTargetType;
 import com.spring_cgv_24th.domain.reservation.dto.ReservationReqDTO;
 import com.spring_cgv_24th.domain.reservation.service.ReservationService;
 import com.spring_cgv_24th.domain.store.dto.StoreOrderReqDTO;
@@ -99,10 +100,10 @@ class ConcurrencyIntegrationTest {
         when(clock.instant()).thenReturn(NOW.plusMinutes(elapsedMinutes).atZone(ZONE).toInstant());
 
         var results = runTogether(10, () -> {
-            storeService.expirePendingOrders();
+            storeService.releaseUnpaidOrderStock();
             return null;
         });
-        storeService.expirePendingOrders();
+        storeService.releaseUnpaidOrderStock();
 
         assertThat(results).containsOnlyNulls();
         assertThat(count("select quantity from theater_stock where theater_id = ?", theaterId)).isEqualTo(expectedStock);
@@ -117,11 +118,46 @@ class ConcurrencyIntegrationTest {
         jdbc.update("update store_order set status = 'COMPLETED', expires_at = null where store_order_id = ?", orderId);
         when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
 
-        storeService.expirePendingOrders();
+        storeService.releaseUnpaidOrderStock();
 
         assertThat(count("select quantity from theater_stock where theater_id = ?", theaterId)).isEqualTo(4);
         assertThat(jdbc.queryForObject("select status from store_order where store_order_id = ?", String.class, orderId))
                 .isEqualTo("COMPLETED");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"9, 1, PENDING_PAYMENT", "10, 0, EXPIRED"})
+    void unpaidReservationReleasesSeatsOnlyAfterTenMinutes(int minutes, int occupied, String status) throws Exception {
+        Target target = paymentTarget(PaymentTargetType.RESERVATION);
+        when(clock.instant()).thenReturn(NOW.plusMinutes(minutes).atZone(ZONE).toInstant());
+
+        assertThat(runTogether(10, () -> { reservationService.releaseUnpaidSeats(); return null; })).containsOnlyNulls();
+        reservationService.releaseUnpaidSeats();
+
+        assertThat(count("select count(*) from screening_seat where screening_seat_id = ? and reservation_id is not null", seatId))
+                .isEqualTo(occupied);
+        assertThat(targetStatus(target)).isEqualTo(status);
+    }
+
+    private Target paymentTarget(PaymentTargetType type) {
+        if (type == PaymentTargetType.STORE_ORDER) {
+            var order = storeService.createOrder(theaterId, memberId,
+                    new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 2))));
+            return new Target(type, order.orderId(), order.paymentOrderId(), order.totalPrice());
+        }
+        var reservation = reservationService.createReservation(memberId,
+                new ReservationReqDTO.CreateReservationDTO(screeningId, List.of(seatId)));
+        return new Target(type, reservation.reservationId(), reservation.paymentOrderId(), reservation.totalPrice());
+    }
+
+    private String targetStatus(Target target) {
+        String sql = target.type() == PaymentTargetType.STORE_ORDER
+                ? "select status from store_order where store_order_id = ?"
+                : "select status from reservation where reservation_id = ?";
+        return jdbc.queryForObject(sql, String.class, target.id());
+    }
+
+    private record Target(PaymentTargetType type, Long id, String orderId, long amount) {
     }
 
     // 각 요청은 서비스 프록시를 통과해 독립 트랜잭션으로 커밋한다.

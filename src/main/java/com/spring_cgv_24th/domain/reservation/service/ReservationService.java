@@ -6,6 +6,7 @@ import com.spring_cgv_24th.domain.reservation.dto.ReservationReqDTO;
 import com.spring_cgv_24th.domain.reservation.dto.ReservationResDTO;
 import com.spring_cgv_24th.domain.reservation.entity.Reservation;
 import com.spring_cgv_24th.domain.reservation.entity.ReservationSeat;
+import com.spring_cgv_24th.domain.reservation.enums.ReservationStatus;
 import com.spring_cgv_24th.domain.reservation.repository.ReservationRepository;
 import com.spring_cgv_24th.domain.reservation.repository.ReservationSeatRepository;
 import com.spring_cgv_24th.domain.screening.entity.Screening;
@@ -86,6 +87,19 @@ public class ReservationService {
         // 좌석 잠금 대기 후의 시각으로 취소 가능 여부를 다시 검증한다.
         reservation.cancel(LocalDateTime.now(clock));
         seats.forEach(ScreeningSeat::release);
+    }
+
+    @Transactional
+    public void releaseUnpaidSeats() {
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<Reservation> reservations = reservationRepository.findForSeatReleaseForUpdate(
+                ReservationStatus.PENDING_PAYMENT, ReservationStatus.PAYMENT_FAILED, now);
+        for (Reservation reservation : reservations) {
+            List<ScreeningSeat> seats = screeningSeatRepository.findAllByReservationIdForUpdate(reservation.getId());
+            if (reservation.releaseSeats(now)) {
+                seats.forEach(ScreeningSeat::release);
+            }
+        }
     }
 
     private void validateSeatIds(List<Long> seatIds) {

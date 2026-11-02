@@ -14,9 +14,11 @@ import org.springframework.data.repository.query.Param;
 public interface StoreOrderRepository extends JpaRepository<StoreOrder, Long> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select o from StoreOrder o where o.status = :status and o.expiresAt <= :now order by o.id")
-    List<StoreOrder> findExpiredOrdersForUpdate(
-            @Param("status") StoreOrderStatus status, @Param("now") LocalDateTime now);
+    @Query("select o from StoreOrder o where (o.status = :pending and o.expiresAt <= :now) "
+            + "or o.status = :failed order by o.id")
+    List<StoreOrder> findOrdersForStockReleaseForUpdate(
+            @Param("pending") StoreOrderStatus pending, @Param("failed") StoreOrderStatus failed,
+            @Param("now") LocalDateTime now);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from StoreOrder o where o.id = :id")
