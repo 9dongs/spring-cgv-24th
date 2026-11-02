@@ -57,6 +57,7 @@ public class ReservationService {
                 .member(member)
                 .screening(screening)
                 .totalPrice(totalPrice)
+                .reservedAt(LocalDateTime.now(clock))
                 .build());
         seats.forEach(seat -> seat.occupy(reservation));
         reservationSeatRepository.saveAll(seats.stream()

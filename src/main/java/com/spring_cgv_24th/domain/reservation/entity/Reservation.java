@@ -1,6 +1,7 @@
 package com.spring_cgv_24th.domain.reservation.entity;
 
 import com.spring_cgv_24th.domain.member.entity.Member;
+import com.spring_cgv_24th.domain.payment.target.PaymentTarget;
 import com.spring_cgv_24th.domain.reservation.enums.ReservationStatus;
 import com.spring_cgv_24th.domain.screening.entity.Screening;
 import com.spring_cgv_24th.global.exception.CustomException;
@@ -8,6 +9,7 @@ import com.spring_cgv_24th.global.exception.ErrorCode;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -18,9 +20,9 @@ import org.hibernate.type.SqlTypes;
 
 @Getter
 @Entity
-@Table(name = "reservation")
+@Table(name = "reservation", indexes = @Index(name = "idx_reservation_expiration", columnList = "status, expires_at"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Reservation {
+public class Reservation implements PaymentTarget {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -52,19 +54,33 @@ public class Reservation {
     @Column(name = "total_price", nullable = false, updatable = false)
     private Long totalPrice;
 
+    @Column(name = "expires_at", updatable = false, columnDefinition = "timestamp(6)")
+    private LocalDateTime expiresAt;
+
+    @Column(name = "payment_order_id", unique = true, updatable = false, length = 64)
+    private String paymentOrderId;
+
     @Builder
-    public Reservation(Member member, Screening screening, long totalPrice) {
+    public Reservation(Member member, Screening screening, long totalPrice, LocalDateTime reservedAt) {
         if (member == null || screening == null || totalPrice <= 0) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
         this.member = member;
         this.screening = screening;
         this.totalPrice = totalPrice;
+        this.reservedAt = reservedAt;
+        this.status = ReservationStatus.PENDING_PAYMENT;
+        this.expiresAt = reservedAt.plusMinutes(10);
+        this.paymentOrderId = UUID.randomUUID().toString();
     }
 
     public void validateCancellation(LocalDateTime now) {
-        if (status == ReservationStatus.CANCELLED) {
+        if (status == ReservationStatus.CANCELLED || status == ReservationStatus.EXPIRED) {
             throw new CustomException(ErrorCode.RESERVATION_ALREADY_CANCELLED);
+        }
+        if (status == ReservationStatus.PAYMENT_PROCESSING
+                || (status == ReservationStatus.CONFIRMED && paymentOrderId != null)) {
+            throw new CustomException(ErrorCode.RESERVATION_PAYMENT_CANCELLATION_REQUIRED);
         }
         screening.validateCancellationTime(now);
     }
@@ -74,4 +90,21 @@ public class Reservation {
         this.cancelledAt = cancelledAt;
         this.status = ReservationStatus.CANCELLED;
     }
+
+    public void beginPayment(LocalDateTime now) {
+        if (status != ReservationStatus.PENDING_PAYMENT || !now.isBefore(expiresAt)) {
+            throw new CustomException(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE);
+        }
+        screening.validateReservationTime(now);
+        status = ReservationStatus.PAYMENT_PROCESSING;
+    }
+
+    public void completePayment() {
+        status = ReservationStatus.CONFIRMED;
+    }
+
+    public void failPayment() {
+        status = ReservationStatus.PAYMENT_FAILED;
+    }
+
 }

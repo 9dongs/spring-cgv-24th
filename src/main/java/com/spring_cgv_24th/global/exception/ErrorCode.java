@@ -64,7 +64,9 @@ public enum ErrorCode {
     STORE_STOCK_INSUFFICIENT(HttpStatus.CONFLICT, "STORE_STOCK409", "구매 가능한 재고가 부족합니다."),
 
     // 결제
-    PAYMENT_TARGET_NOT_PAYABLE(HttpStatus.CONFLICT, "PAYMENT_TARGET409", "결제할 수 없는 상태이거나 기한이 지났습니다.");
+    PAYMENT_TARGET_NOT_PAYABLE(HttpStatus.CONFLICT, "PAYMENT_TARGET409", "결제할 수 없는 상태이거나 기한이 지났습니다."),
+    RESERVATION_PAYMENT_CANCELLATION_REQUIRED(HttpStatus.CONFLICT, "RESERVATION_PAYMENT409",
+            "결제 진행 중인 예매는 결과 확인이 필요하며, 결제 완료 예매는 환불 절차가 필요합니다.");
     private final HttpStatus httpStatus;
     private final String code;
     private final String message;

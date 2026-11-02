@@ -71,7 +71,7 @@ class ReservationServiceTest {
         Screening screening = screening(NOW.plusHours(1));
         ScreeningSeat seat = seat(screening);
         Reservation existing = Reservation.builder().member(mock(Member.class))
-                .screening(screening).totalPrice(14_000).build();
+                .screening(screening).totalPrice(14_000).reservedAt(NOW).build();
         seat.occupy(existing);
         assertEquals(ErrorCode.SEAT_ALREADY_RESERVED,
                 assertThrows(CustomException.class, () -> seat.occupy(existing)).getErrorCode());
@@ -106,8 +106,10 @@ class ReservationServiceTest {
 
         assertNotNull(seat.getReservation());
         assertSame(member, seat.getReservation().getMember());
-        assertEquals(ReservationStatus.CONFIRMED, response.status());
+        assertEquals(ReservationStatus.PENDING_PAYMENT, response.status());
         assertEquals(14_000L, response.totalPrice());
+        assertEquals(NOW.plusMinutes(10), response.expiresAt());
+        assertNotNull(response.paymentOrderId());
         assertEquals(14_000L, seat.getReservation().getTotalPrice());
         verify(reservationSeatRepository).saveAll(any());
     }
@@ -169,7 +171,7 @@ class ReservationServiceTest {
     void cancellationReleasesSeatsAndRejectsRepeatedCancellation() {
         Screening screening = screening(NOW.plusHours(1));
         Reservation reservation = Reservation.builder().member(owner()).screening(screening)
-                .totalPrice(28_000).build();
+                .totalPrice(28_000).reservedAt(NOW).build();
         ScreeningSeat first = seat(screening);
         ScreeningSeat second = seat(screening);
         first.occupy(reservation);
@@ -239,10 +241,23 @@ class ReservationServiceTest {
     }
 
     @Test
+    void legacyConfirmedReservationKeepsItsCancellationBehavior() {
+        Reservation reservation = Reservation.builder().member(owner()).screening(screening(NOW.plusHours(1)))
+                .totalPrice(14_000).reservedAt(NOW).build();
+        ReflectionTestUtils.setField(reservation, "status", ReservationStatus.CONFIRMED);
+        ReflectionTestUtils.setField(reservation, "paymentOrderId", null);
+        when(reservationRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(reservation));
+
+        reservationService.cancelReservation(1L, MEMBER_ID);
+
+        assertEquals(ReservationStatus.CANCELLED, reservation.getStatus());
+    }
+
+    @Test
     void cancellationAtScreeningStartIsRejectedWithoutReleasingSeats() {
         Screening screening = screening(NOW);
         Reservation reservation = Reservation.builder().member(owner()).screening(screening)
-                .totalPrice(14_000).build();
+                .totalPrice(14_000).reservedAt(NOW).build();
         ScreeningSeat seat = seat(screening);
         seat.occupy(reservation);
         when(reservationRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(reservation));
@@ -252,7 +267,7 @@ class ReservationServiceTest {
 
         assertEquals(ErrorCode.RESERVATION_CANCELLATION_CLOSED, error.getErrorCode());
         assertSame(reservation, seat.getReservation());
-        assertEquals(ReservationStatus.CONFIRMED, reservation.getStatus());
+        assertEquals(ReservationStatus.PENDING_PAYMENT, reservation.getStatus());
         assertNull(reservation.getCancelledAt());
         verifyNoInteractions(screeningSeatRepository);
     }
@@ -268,7 +283,7 @@ class ReservationServiceTest {
                 reservationRepository, reservationSeatRepository, advancingClock);
         Screening screening = screening(NOW);
         Reservation reservation = Reservation.builder().member(owner()).screening(screening)
-                .totalPrice(14_000).build();
+                .totalPrice(14_000).reservedAt(NOW).build();
         ScreeningSeat seat = seat(screening);
         seat.occupy(reservation);
         when(reservationRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(reservation));
@@ -279,7 +294,7 @@ class ReservationServiceTest {
 
         assertEquals(ErrorCode.RESERVATION_CANCELLATION_CLOSED, error.getErrorCode());
         assertSame(reservation, seat.getReservation());
-        assertEquals(ReservationStatus.CONFIRMED, reservation.getStatus());
+        assertEquals(ReservationStatus.PENDING_PAYMENT, reservation.getStatus());
         assertNull(reservation.getCancelledAt());
     }
 
@@ -288,7 +303,7 @@ class ReservationServiceTest {
     void anotherMemberCannotCancelReservation() {
         Screening screening = screening(NOW.plusHours(1));
         Reservation reservation = Reservation.builder().member(owner()).screening(screening)
-                .totalPrice(14_000).build();
+                .totalPrice(14_000).reservedAt(NOW).build();
         ScreeningSeat seat = seat(screening);
         seat.occupy(reservation);
         when(reservationRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(reservation));
@@ -297,7 +312,7 @@ class ReservationServiceTest {
                 () -> reservationService.cancelReservation(1L, MEMBER_ID + 1));
 
         assertEquals(ErrorCode.RESERVATION_FORBIDDEN, error.getErrorCode());
-        assertEquals(ReservationStatus.CONFIRMED, reservation.getStatus());
+        assertEquals(ReservationStatus.PENDING_PAYMENT, reservation.getStatus());
         assertNull(reservation.getCancelledAt());
         assertSame(reservation, seat.getReservation());
         verifyNoInteractions(screeningSeatRepository);
