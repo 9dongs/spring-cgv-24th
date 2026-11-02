@@ -11,6 +11,7 @@ import com.spring_cgv_24th.domain.store.entity.Product;
 import com.spring_cgv_24th.domain.store.entity.StoreOrder;
 import com.spring_cgv_24th.domain.store.entity.StoreOrderItem;
 import com.spring_cgv_24th.domain.store.entity.TheaterStock;
+import com.spring_cgv_24th.domain.store.enums.StoreOrderStatus;
 import com.spring_cgv_24th.domain.store.repository.ProductRepository;
 import com.spring_cgv_24th.domain.store.repository.StoreOrderItemRepository;
 import com.spring_cgv_24th.domain.store.repository.StoreOrderRepository;
@@ -108,6 +109,23 @@ public class StoreService {
         return StoreOrderResDTO.from(order, storeOrderItemRepository.saveAll(items));
     }
 
+    @Transactional
+    public void expirePendingOrders() {
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<StoreOrder> orders = storeOrderRepository
+                .findExpiredOrdersForUpdate(StoreOrderStatus.PENDING_PAYMENT, now);
+        for (StoreOrder order : orders) {
+            if (!order.expire(now)) {
+                continue;
+            }
+            List<StoreOrderItem> items = storeOrderItemRepository.findAllByOrder_IdOrderByProduct_IdAsc(order.getId());
+            for (StoreOrderItem item : items) {
+                TheaterStock stock = lockStock(order.getTheater().getId(), item.getProduct().getId());
+                stock.addQuantity(item.getQuantity());
+            }
+        }
+    }
+
     private void validateUniqueProducts(List<StoreOrderReqDTO.OrderItemDTO> items) {
         List<Long> productIds = items.stream().map(StoreOrderReqDTO.OrderItemDTO::productId).toList();
         if (new HashSet<>(productIds).size() != productIds.size()) {
@@ -122,10 +140,7 @@ public class StoreService {
         // 동시 구매 시 재고 행의 잠금 순서가 엇갈리지 않도록 상품 ID 오름차순으로 조회한다.
         for (StoreOrderReqDTO.OrderItemDTO item : orderItems.stream()
                 .sorted(Comparator.comparing(StoreOrderReqDTO.OrderItemDTO::productId)).toList()) {
-            TheaterStock stock = theaterStockRepository
-                    .findByTheaterIdAndProductIdForUpdate(theaterId, item.productId())
-                    .orElseThrow(() -> new CustomException(productRepository.existsById(item.productId())
-                            ? ErrorCode.THEATER_STOCK_NOT_FOUND : ErrorCode.PRODUCT_NOT_FOUND));
+            TheaterStock stock = lockStock(theaterId, item.productId());
             stock.decreaseQuantity(item.quantity());
             items.add(StoreOrderItem.builder()
                     .order(order)
@@ -135,5 +150,11 @@ public class StoreService {
         }
 
         return items;
+    }
+
+    private TheaterStock lockStock(Long theaterId, Long productId) {
+        return theaterStockRepository.findByTheaterIdAndProductIdForUpdate(theaterId, productId)
+                .orElseThrow(() -> new CustomException(productRepository.existsById(productId)
+                        ? ErrorCode.THEATER_STOCK_NOT_FOUND : ErrorCode.PRODUCT_NOT_FOUND));
     }
 }

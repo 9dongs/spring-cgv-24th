@@ -13,7 +13,7 @@ import lombok.NoArgsConstructor;
 
 @Getter
 @Entity
-@Table(name = "store_order")
+@Table(name = "store_order", indexes = @Index(name = "idx_store_order_expiration", columnList = "status, expires_at"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class StoreOrder {
 
@@ -50,4 +50,11 @@ public class StoreOrder {
         this.expiresAt = purchasedAt.plusMinutes(10);
     }
 
+    public boolean expire(LocalDateTime now) {
+        if (status != StoreOrderStatus.PENDING_PAYMENT || now.isBefore(expiresAt)) {
+            return false;
+        }
+        status = StoreOrderStatus.EXPIRED;
+        return true;
+    }
 }

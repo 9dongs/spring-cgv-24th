@@ -1,6 +1,7 @@
 package com.spring_cgv_24th.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
 import com.spring_cgv_24th.domain.reservation.dto.ReservationReqDTO;
 import com.spring_cgv_24th.domain.reservation.service.ReservationService;
@@ -9,7 +10,9 @@ import com.spring_cgv_24th.domain.store.service.StoreService;
 import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
 import java.sql.Statement;
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -22,29 +25,38 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @SpringBootTest
 class ConcurrencyIntegrationTest {
 
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 30, 12, 0);
+    private static final ZoneId ZONE = ZoneId.of("Asia/Seoul");
+
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ReservationService reservationService;
     @Autowired private StoreService storeService;
+    @MockitoBean private Clock clock;
 
     private long memberId, theaterId, auditoriumId, screeningId, seatId, productId;
 
     @BeforeEach
     void setUp() {
+        when(clock.getZone()).thenReturn(ZONE);
+        when(clock.instant()).thenReturn(NOW.atZone(ZONE).toInstant());
         memberId = insert("insert into member (email, name, password_hash, role) values (?, '동시성 회원', 'unused', 'USER')",
                 UUID.randomUUID() + "@test.local");
         theaterId = insert("insert into theater (name, address) values ('동시성 영화관', '테스트')");
         long typeId = jdbc.queryForObject("select auditorium_type_id from auditorium_type where kind = 'GENERAL'", Long.class);
         auditoriumId = insert("insert into auditorium (theater_id, type_id, name) values (?, ?, '1관')", theaterId, typeId);
         long movieId = insert("insert into movie (title, duration_minutes, age_rating) values ('동시성 영화', 90, 'ALL')");
-        LocalDateTime start = LocalDateTime.now().plusDays(1);
+        LocalDateTime start = NOW.plusDays(1);
         screeningId = insert("insert into screening (movie_id, auditorium_id, starts_at, ends_at) values (?, ?, ?, ?)",
                 movieId, auditoriumId, start, start.plusMinutes(90));
         seatId = insert("insert into screening_seat (screening_id, row_no, column_no, price) values (?, 1, 1, 14000)", screeningId);
@@ -76,6 +88,40 @@ class ConcurrencyIntegrationTest {
         assertThat(count("select quantity from theater_stock where theater_id = ?", theaterId)).isEqualTo(1);
         assertThat(count("select count(*) from store_order where theater_id = ?", theaterId)).isEqualTo(5);
         assertThat(count("select sum(quantity) from store_order_item where product_id = ?", productId)).isEqualTo(5);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"9, 4, PENDING_PAYMENT", "10, 6, EXPIRED"})
+    void concurrentExpirationRestoresStockOnlyOnceAfterTenMinutes(
+            int elapsedMinutes, int expectedStock, String expectedStatus) throws Exception {
+        var request = new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 2)));
+        long orderId = storeService.createOrder(theaterId, memberId, request).orderId();
+        when(clock.instant()).thenReturn(NOW.plusMinutes(elapsedMinutes).atZone(ZONE).toInstant());
+
+        var results = runTogether(10, () -> {
+            storeService.expirePendingOrders();
+            return null;
+        });
+        storeService.expirePendingOrders();
+
+        assertThat(results).containsOnlyNulls();
+        assertThat(count("select quantity from theater_stock where theater_id = ?", theaterId)).isEqualTo(expectedStock);
+        assertThat(jdbc.queryForObject("select status from store_order where store_order_id = ?", String.class, orderId))
+                .isEqualTo(expectedStatus);
+    }
+
+    @Test
+    void completedOrdersDoNotExpireOrRestoreStock() {
+        var request = new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 2)));
+        long orderId = storeService.createOrder(theaterId, memberId, request).orderId();
+        jdbc.update("update store_order set status = 'COMPLETED', expires_at = null where store_order_id = ?", orderId);
+        when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
+
+        storeService.expirePendingOrders();
+
+        assertThat(count("select quantity from theater_stock where theater_id = ?", theaterId)).isEqualTo(4);
+        assertThat(jdbc.queryForObject("select status from store_order where store_order_id = ?", String.class, orderId))
+                .isEqualTo("COMPLETED");
     }
 
     // 각 요청은 서비스 프록시를 통과해 독립 트랜잭션으로 커밋한다.
