@@ -19,6 +19,8 @@ import com.spring_cgv_24th.domain.theater.entity.Theater;
 import com.spring_cgv_24th.domain.theater.repository.TheaterRepository;
 import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -40,6 +42,7 @@ public class StoreService {
     private final MemberRepository memberRepository;
     private final StoreOrderRepository storeOrderRepository;
     private final StoreOrderItemRepository storeOrderItemRepository;
+    private final Clock clock;
 
     public List<ProductResDTO> getProducts() {
         return productRepository.findAll(Sort.by("id")).stream()
@@ -97,6 +100,7 @@ public class StoreService {
         StoreOrder order = StoreOrder.builder()
                 .member(member)
                 .theater(theater)
+                .purchasedAt(LocalDateTime.now(clock))
                 .build();
         List<StoreOrderItem> items = reserveStockAndCreateItems(theaterId, order, request.items());
 
