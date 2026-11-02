@@ -345,6 +345,32 @@ class ConcurrencyIntegrationTest {
                 .isEqualTo(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE);
     }
 
+    @ParameterizedTest
+    @CsvSource({"STORE_ORDER, false", "RESERVATION, true"})
+    void uncertainCancellationKeepsResourcesUntilAutomaticLookupConfirmsIt(PaymentTargetType type, boolean invalidResponse) {
+        Target target = paidTarget(type);
+        when(gateway.cancel(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+            if (invalidResponse) return new PaymentGateway.Result("payment-key", target.orderId(), "CANCELED", "KRW",
+                    target.amount(), 1, "카드", NOW.atZone(ZONE).toOffsetDateTime());
+            throw new PaymentGateway.Failure(false);
+        });
+        assertThat(assertThrows(CustomException.class,
+                () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST)).getErrorCode())
+                .isEqualTo(ErrorCode.PAYMENT_GATEWAY_ERROR);
+        when(gateway.find("payment-key")).thenReturn(approved(target, target.amount()));
+        assertThat(paymentService.getPayment(memberId, type, target.id()).status()).isEqualTo(PaymentStatus.CANCEL_UNKNOWN);
+        releaseUnpaidResources();
+        assertResources(target, true);
+
+        when(gateway.find("payment-key")).thenReturn(cancelled(target));
+        paymentService.recoverUnresolvedPayments();
+        paymentService.recoverUnresolvedPayments();
+
+        assertThat(paymentService.getPayment(memberId, type, target.id()).status()).isEqualTo(PaymentStatus.CANCELLED);
+        assertResources(target, false);
+        verify(gateway, times(1)).cancel(anyString(), anyString(), anyString());
+    }
+
     @Test
     void cancellationRetryReusesTheOriginalReasonAndIdempotencyKey() {
         Target target = paidTarget(PaymentTargetType.STORE_ORDER);
@@ -372,6 +398,25 @@ class ConcurrencyIntegrationTest {
 
         assertResources(target, true);
         verify(gateway, never()).cancel(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void confirmedCancellationRecoversAfterLocalStockUpdateFails() {
+        Target target = paidTarget(PaymentTargetType.STORE_ORDER);
+        when(gateway.cancel(anyString(), anyString(), anyString())).thenReturn(cancelled(target));
+        jdbc.update("update theater_stock set quantity = ? where theater_id = ?", Integer.MAX_VALUE, theaterId);
+        assertThrows(CustomException.class, () -> paymentService.cancel(memberId, target.type(), target.id(), CANCEL_REQUEST));
+        assertThat(targetStatus(target)).isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("select status from payment where target_type = 'STORE_ORDER' and target_id = ?",
+                String.class, target.id())).isEqualTo("CANCEL_PROCESSING");
+        jdbc.update("update theater_stock set quantity = 4 where theater_id = ?", theaterId);
+        when(gateway.find("payment-key")).thenReturn(cancelled(target));
+
+        paymentService.recoverUnresolvedPayments();
+
+        assertThat(targetStatus(target)).isEqualTo("CANCELLED");
+        assertResources(target, false);
+        verify(gateway, times(1)).cancel(anyString(), anyString(), anyString());
     }
 
     private Target paidTarget(PaymentTargetType type) {

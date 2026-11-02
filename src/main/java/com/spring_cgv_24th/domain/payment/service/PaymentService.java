@@ -140,7 +140,8 @@ public class PaymentService {
 
     public void recoverUnresolvedPayments() {
         List<PaymentResDTO> payments = transaction.execute(status -> paymentRepository.findUnresolvedPayments(
-                        List.of(PaymentStatus.PROCESSING, PaymentStatus.UNKNOWN), LocalDateTime.now(clock))
+                        List.of(PaymentStatus.PROCESSING, PaymentStatus.UNKNOWN),
+                        List.of(PaymentStatus.CANCEL_PROCESSING, PaymentStatus.CANCEL_UNKNOWN), LocalDateTime.now(clock))
                 .stream().map(PaymentResDTO::from).toList());
         for (PaymentResDTO payment : payments) {
             try {

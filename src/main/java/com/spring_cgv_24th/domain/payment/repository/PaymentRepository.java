@@ -16,14 +16,15 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     @Query("""
             select p from Payment p
-            where p.status in :statuses and (
+            where p.status in :cancelStatuses or (p.status in :statuses and (
                 (p.targetType = com.spring_cgv_24th.domain.payment.enums.PaymentTargetType.STORE_ORDER
                  and exists (select o.id from StoreOrder o where o.id = p.targetId and o.expiresAt <= :now))
                 or
                 (p.targetType = com.spring_cgv_24th.domain.payment.enums.PaymentTargetType.RESERVATION
                  and exists (select r.id from Reservation r where r.id = p.targetId and r.expiresAt <= :now))
-            ) order by p.id
+            )) order by p.id
             """)
     List<Payment> findUnresolvedPayments(@Param("statuses") List<PaymentStatus> statuses,
+                                         @Param("cancelStatuses") List<PaymentStatus> cancelStatuses,
                                          @Param("now") LocalDateTime now);
 }
