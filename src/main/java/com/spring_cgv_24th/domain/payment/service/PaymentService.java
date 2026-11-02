@@ -17,8 +17,10 @@ import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.BiConsumer;
+import lombok.extern.slf4j.Slf4j;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+@Slf4j
 @Service
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 public class PaymentService {
@@ -94,6 +97,20 @@ public class PaymentService {
             return PaymentResDTO.from(requirePayment(type, targetId));
         });
         return refreshPayment(current);
+    }
+
+    public void recoverUnresolvedPayments() {
+        List<PaymentResDTO> payments = transaction.execute(status -> paymentRepository.findUnresolvedPayments(
+                        List.of(PaymentStatus.PROCESSING, PaymentStatus.UNKNOWN), LocalDateTime.now(clock))
+                .stream().map(PaymentResDTO::from).toList());
+        for (PaymentResDTO payment : payments) {
+            try {
+                refreshPayment(payment);
+            } catch (RuntimeException error) {
+                log.warn("미확정 결제 재조회 실패: targetType={}, targetId={}",
+                        payment.targetType(), payment.targetId(), error);
+            }
+        }
     }
 
     private PaymentResDTO refreshPayment(PaymentResDTO current) {

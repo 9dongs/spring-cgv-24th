@@ -13,8 +13,14 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "payment.expiration-enabled", havingValue = "true", matchIfMissing = true)
 public class PaymentReleaseScheduler {
+    private final PaymentService paymentService;
     private final StoreService storeService;
     private final ReservationService reservationService;
+
+    @Scheduled(fixedDelay = 30_000)
+    public void recoverPayments() {
+        paymentService.recoverUnresolvedPayments();
+    }
 
     @Scheduled(fixedDelay = 30_000)
     public void releaseStoreStock() {

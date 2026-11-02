@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -248,6 +249,65 @@ class ConcurrencyIntegrationTest {
 
         when(gateway.find("payment-key")).thenReturn(approved(target, target.amount()));
         assertThat(paymentService.getPayment(memberId, type, target.id()).status()).isEqualTo(PaymentStatus.COMPLETED);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "STORE_ORDER, PROCESSING, DONE, COMPLETED, true",
+            "RESERVATION, UNKNOWN, DONE, CONFIRMED, true",
+            "STORE_ORDER, UNKNOWN, EXPIRED, CANCELLED, false",
+            "RESERVATION, PROCESSING, ABORTED, CANCELLED, false",
+            "STORE_ORDER, UNKNOWN, ERROR, PAYMENT_PROCESSING, true",
+            "RESERVATION, PROCESSING, ERROR, PAYMENT_PROCESSING, true"
+    })
+    void overduePaymentsAreAutomaticallyRechecked(PaymentTargetType type, String initialStatus,
+                                                  String responseStatus, String expectedStatus, boolean resourcesHeld) {
+        Target target = paymentTarget(type);
+        when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenThrow(new PaymentGateway.Failure(false));
+        assertThrows(CustomException.class, () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target)));
+        jdbc.update("update payment set status = ? where target_type = ? and target_id = ?", initialStatus, type.name(), target.id());
+        when(clock.instant()).thenReturn(NOW.plusMinutes(9).atZone(ZONE).toInstant());
+        paymentService.recoverUnresolvedPayments();
+        verify(gateway, never()).find(anyString());
+
+        when(gateway.find("payment-key")).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            if (responseStatus.equals("ERROR")) throw new PaymentGateway.Failure(false);
+            if (responseStatus.equals("DONE")) return approved(target, target.amount());
+            return new PaymentGateway.Result("payment-key", target.orderId(), responseStatus, "KRW", target.amount(), 0, null, null);
+        });
+        when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
+        paymentService.recoverUnresolvedPayments();
+        releaseUnpaidResources();
+        paymentService.recoverUnresolvedPayments();
+        releaseUnpaidResources();
+
+        assertThat(targetStatus(target)).isEqualTo(expectedStatus);
+        assertResources(target, resourcesHeld);
+        verify(gateway, times(responseStatus.equals("ERROR") ? 2 : 1)).find("payment-key");
+    }
+
+    @Test
+    void failedLookupDoesNotBlockRecoveryOfOtherPayments() {
+        Target order = paymentTarget(PaymentTargetType.STORE_ORDER);
+        Target reservation = paymentTarget(PaymentTargetType.RESERVATION);
+        when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenThrow(new PaymentGateway.Failure(false));
+        assertThrows(CustomException.class,
+                () -> paymentService.confirm(memberId, order.type(), order.id(), paymentRequest(order)));
+        assertThrows(CustomException.class, () -> paymentService.confirm(memberId, reservation.type(), reservation.id(),
+                new PaymentReqDTO("reservation-payment-key", reservation.orderId(), reservation.amount())));
+        when(gateway.find("payment-key")).thenThrow(new PaymentGateway.Failure(false));
+        when(gateway.find("reservation-payment-key")).thenReturn(new PaymentGateway.Result(
+                "reservation-payment-key", reservation.orderId(), "DONE", "KRW", reservation.amount(), reservation.amount(),
+                "카드", NOW.atZone(ZONE).toOffsetDateTime()));
+        when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
+
+        paymentService.recoverUnresolvedPayments();
+
+        assertThat(targetStatus(order)).isEqualTo("PAYMENT_PROCESSING");
+        assertThat(targetStatus(reservation)).isEqualTo("CONFIRMED");
+        assertResources(order, true);
+        assertResources(reservation, true);
     }
 
     private Target paymentTarget(PaymentTargetType type) {
