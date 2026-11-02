@@ -64,7 +64,15 @@ public enum ErrorCode {
     STORE_STOCK_INSUFFICIENT(HttpStatus.CONFLICT, "STORE_STOCK409", "구매 가능한 재고가 부족합니다."),
 
     // 결제
+    PAYMENT_TARGET_NOT_FOUND(HttpStatus.NOT_FOUND, "PAYMENT_TARGET404", "결제 대상을 찾을 수 없습니다."),
+    PAYMENT_FORBIDDEN(HttpStatus.FORBIDDEN, "PAYMENT403", "본인의 결제만 처리하거나 조회할 수 있습니다."),
     PAYMENT_TARGET_NOT_PAYABLE(HttpStatus.CONFLICT, "PAYMENT_TARGET409", "결제할 수 없는 상태이거나 기한이 지났습니다."),
+    PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "PAYMENT404", "결제 정보를 찾을 수 없습니다."),
+    PAYMENT_AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "PAYMENT_AMOUNT400", "결제 금액이 일치하지 않습니다."),
+    PAYMENT_REQUEST_CONFLICT(HttpStatus.CONFLICT, "PAYMENT_REQUEST409", "주문번호 또는 결제 키가 일치하지 않습니다."),
+    PAYMENT_PENDING(HttpStatus.CONFLICT, "PAYMENT_PENDING409", "결제 조회로 처리 결과를 확인해주세요."),
+    PAYMENT_CONFIRMATION_FAILED(HttpStatus.BAD_REQUEST, "PAYMENT_FAILED400", "결제 승인이 거절되었습니다."),
+    PAYMENT_GATEWAY_ERROR(HttpStatus.BAD_GATEWAY, "PAYMENT_GATEWAY502", "결제사 응답을 확인할 수 없습니다. 결제 조회로 상태를 확인해주세요."),
     RESERVATION_PAYMENT_CANCELLATION_REQUIRED(HttpStatus.CONFLICT, "RESERVATION_PAYMENT409",
             "결제 진행 중인 예매는 결과 확인이 필요하며, 결제 완료 예매는 환불 절차가 필요합니다.");
     private final HttpStatus httpStatus;
