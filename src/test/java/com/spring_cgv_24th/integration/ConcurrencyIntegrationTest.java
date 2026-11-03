@@ -291,6 +291,29 @@ class ConcurrencyIntegrationTest {
         verify(gateway, times(responseStatus.equals("ERROR") ? 2 : 1)).find("payment-key");
     }
 
+    @ParameterizedTest
+    @EnumSource(PaymentTargetType.class)
+    void missingApprovalEventuallyReleasesResources(PaymentTargetType type) {
+        Target target = paymentTarget(type);
+        when(gateway.confirm(anyString(), anyString(), anyLong(), anyString()))
+                .thenThrow(new PaymentGateway.Failure(false));
+        assertThrows(CustomException.class,
+                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target)));
+        when(gateway.find("payment-key"))
+                .thenThrow(new PaymentGateway.Failure(PaymentGateway.Failure.Kind.NOT_FOUND));
+
+        when(clock.instant()).thenReturn(NOW.plusMinutes(39).atZone(ZONE).toInstant());
+        paymentService.recoverUnresolvedPayments();
+        releaseUnpaidResources();
+        assertResources(target, true);
+
+        when(clock.instant()).thenReturn(NOW.plusMinutes(40).atZone(ZONE).toInstant());
+        paymentService.recoverUnresolvedPayments();
+        releaseUnpaidResources();
+        assertThat(paymentService.getPayment(memberId, type, target.id()).status()).isEqualTo(PaymentStatus.FAILED);
+        assertResources(target, false);
+    }
+
     @Test
     void failedLookupDoesNotBlockRecoveryOfOtherPayments() {
         Target order = paymentTarget(PaymentTargetType.STORE_ORDER);
@@ -502,6 +525,29 @@ class ConcurrencyIntegrationTest {
                 .isEqualTo(target.amount() - amount);
         assertPartialResources(target, 1);
         verify(gateway, times(2)).cancel("payment-key", request.cancelReason(), amount, partialKey(target, request));
+    }
+
+    @ParameterizedTest
+    @EnumSource(PaymentTargetType.class)
+    void rejectedPartialCancellationIsRecoveredAndAllowsAnotherRequest(PaymentTargetType type) {
+        Target target = paidPartialTarget(type);
+        var first = partialRequest(target, 0);
+        var next = partialRequest(target, 1);
+        when(gateway.cancel(anyString(), anyString(), anyLong(), anyString()))
+                .thenThrow(new PaymentGateway.Failure(true))
+                .thenReturn(partiallyCancelled(target, target.amount() - partialAmount(target, 1)));
+        when(gateway.find("payment-key")).thenThrow(new PaymentGateway.Failure(false))
+                .thenReturn(approved(target, target.amount()));
+
+        assertThrows(CustomException.class, () -> paymentService.cancelPartially(memberId, type, target.id(), first));
+        paymentService.recoverUnresolvedPayments();
+        assertPartialResources(target, 0);
+        assertThat(assertThrows(CustomException.class,
+                () -> paymentService.cancelPartially(memberId, type, target.id(), first)).getErrorCode())
+                .isEqualTo(ErrorCode.PAYMENT_CANCELLATION_REJECTED);
+        assertThat(paymentService.cancelPartially(memberId, type, target.id(), next).status())
+                .isEqualTo(PaymentStatus.PARTIALLY_CANCELLED);
+        verify(gateway, times(2)).cancel(anyString(), anyString(), anyLong(), anyString());
     }
 
     @Test

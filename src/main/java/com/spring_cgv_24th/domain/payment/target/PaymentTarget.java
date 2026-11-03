@@ -7,6 +7,7 @@ public interface PaymentTarget {
     Long getId();
     Member getMember();
     String getPaymentOrderId();
+    LocalDateTime getExpiresAt();
     void beginPayment(LocalDateTime now);
     void completePayment();
     void failPayment();

@@ -8,6 +8,7 @@ public enum PaymentStatus {
     FAILED,
     CANCEL_PROCESSING,
     CANCEL_UNKNOWN,
+    CANCEL_REJECTED_VERIFY,
     CANCELLED;
 
     public boolean isTerminal() {
@@ -15,6 +16,6 @@ public enum PaymentStatus {
     }
 
     public boolean isCancellationPending() {
-        return this == CANCEL_PROCESSING || this == CANCEL_UNKNOWN;
+        return this == CANCEL_PROCESSING || this == CANCEL_UNKNOWN || this == CANCEL_REJECTED_VERIFY;
     }
 }

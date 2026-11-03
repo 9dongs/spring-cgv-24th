@@ -19,15 +19,25 @@ public interface PaymentGateway {
     }
 
     class Failure extends RuntimeException {
-        private final boolean rejected;
+        public enum Kind { UNKNOWN, REJECTED, NOT_FOUND }
+
+        private final Kind kind;
 
         public Failure(boolean rejected) {
-            super(rejected ? "Payment rejected" : "Payment result unknown");
-            this.rejected = rejected;
+            this(rejected ? Kind.REJECTED : Kind.UNKNOWN);
+        }
+
+        public Failure(Kind kind) {
+            super("Payment gateway result: " + kind);
+            this.kind = kind;
         }
 
         public boolean isRejected() {
-            return rejected;
+            return kind == Kind.REJECTED;
+        }
+
+        public boolean isNotFound() {
+            return kind == Kind.NOT_FOUND;
         }
     }
 }

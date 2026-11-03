@@ -83,12 +83,26 @@ public class Payment {
     }
 
     public void markUnknown() {
-        status = status.isCancellationPending() ? PaymentStatus.CANCEL_UNKNOWN : PaymentStatus.UNKNOWN;
+        if (status != PaymentStatus.CANCEL_REJECTED_VERIFY) {
+            status = status.isCancellationPending() ? PaymentStatus.CANCEL_UNKNOWN : PaymentStatus.UNKNOWN;
+        }
     }
 
     public void beginCancellation(String reason) {
         cancelReason = reason;
         status = PaymentStatus.CANCEL_PROCESSING;
+    }
+
+    public void verifyCancellationRejection() {
+        status = PaymentStatus.CANCEL_REJECTED_VERIFY;
+    }
+
+    public void rejectCancellation() {
+        status = balanceAmount == amount ? PaymentStatus.COMPLETED : PaymentStatus.PARTIALLY_CANCELLED;
+        cancelReason = cancellations.reversed().stream()
+                .filter(cancellation -> cancellation.getCompletedAt() != null)
+                .map(PaymentCancellation::getCancelReason)
+                .findFirst().orElse(null);
     }
 
     public void cancel(long balanceAmount) {

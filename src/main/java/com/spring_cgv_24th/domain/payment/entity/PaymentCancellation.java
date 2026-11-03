@@ -50,6 +50,7 @@ public class PaymentCancellation {
     private Instant requestedAt;
 
     private Instant completedAt;
+    private Instant failedAt;
 
     public PaymentCancellation(Payment payment, String requestId, String cancelReason, long amount,
                                boolean fullCancellation, Map<Long, Integer> items, Instant requestedAt) {
@@ -61,6 +62,10 @@ public class PaymentCancellation {
         this.fullCancellation = fullCancellation;
         this.items.putAll(items);
         this.requestedAt = requestedAt;
+    }
+
+    public void fail(Instant failedAt) {
+        this.failedAt = failedAt;
     }
 
     public void complete(Instant completedAt) {

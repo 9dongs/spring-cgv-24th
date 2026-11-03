@@ -14,6 +14,10 @@ public class TossPaymentGateway implements PaymentGateway {
             "REJECT_CARD_PAYMENT", "REJECT_ACCOUNT_PAYMENT", "REJECT_CARD_COMPANY",
             "INVALID_REJECT_CARD", "INVALID_STOPPED_CARD", "INVALID_CARD_LOST_OR_STOLEN");
 
+    private static final Set<String> CANCELLATION_REJECTION_CODES = Set.of(
+            "EXCEED_CANCEL_AMOUNT_DISCOUNT_AMOUNT", "NOT_ALLOWED_PARTIAL_REFUND",
+            "NOT_ALLOWED_PARTIAL_REFUND_WAITING_DEPOSIT", "EXCEED_MAX_REFUND_DUE", "EXCEED_CANCEL_LIMIT");
+
     private final RestClient client;
 
     public TossPaymentGateway(RestClient client) {
@@ -26,13 +30,13 @@ public class TossPaymentGateway implements PaymentGateway {
                 .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(new ConfirmBody(paymentKey, orderId, amount))
-                .retrieve().body(Result.class));
+                .retrieve().body(Result.class), REJECTION_CODES, false);
     }
 
     @Override
     public Result find(String paymentKey) {
         return execute(() -> client.get().uri("/v1/payments/{paymentKey}", paymentKey)
-                .retrieve().body(Result.class));
+                .retrieve().body(Result.class), Set.of(), true);
     }
 
     @Override
@@ -50,10 +54,10 @@ public class TossPaymentGateway implements PaymentGateway {
                 .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
-                .retrieve().body(Result.class));
+                .retrieve().body(Result.class), CANCELLATION_REJECTION_CODES, false);
     }
 
-    private Result execute(Supplier<Result> request) {
+    private Result execute(Supplier<Result> request, Set<String> rejectionCodes, boolean lookup) {
         try {
             return request.get();
         } catch (RestClientResponseException error) {
@@ -64,8 +68,11 @@ public class TossPaymentGateway implements PaymentGateway {
             } catch (RuntimeException decodingFailure) {
                 throw new Failure(false);
             }
-            throw new Failure(error.getStatusCode().is4xxClientError()
-                    && body != null && body.code() != null && REJECTION_CODES.contains(body.code()));
+            String code = body == null ? null : body.code();
+            if (lookup && error.getStatusCode().value() == 404 && "NOT_FOUND_PAYMENT".equals(code)) {
+                throw new Failure(Failure.Kind.NOT_FOUND);
+            }
+            throw new Failure(error.getStatusCode().is4xxClientError() && code != null && rejectionCodes.contains(code));
         } catch (RestClientException error) {
             throw new Failure(false);
         }
