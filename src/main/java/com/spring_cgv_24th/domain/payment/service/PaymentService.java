@@ -308,8 +308,8 @@ public class PaymentService {
                 && response.status() != null && response.balanceAmount() >= 0
                 && response.balanceAmount() <= payment.amount()
                 && (!"CANCELED".equals(response.status()) || response.balanceAmount() == 0)
-                && (!"PARTIAL_CANCELED".equals(response.status())
-                    || (response.balanceAmount() > 0 && response.balanceAmount() < payment.amount()))
+                // 여러 번 취소하면 토스가 잔액 0원에도 PARTIAL_CANCELED를 반환할 수 있다.
+                && (!"PARTIAL_CANCELED".equals(response.status()) || response.balanceAmount() < payment.amount())
                 && (!"DONE".equals(response.status()) || (response.approvedAt() != null && response.method() != null));
     }
 

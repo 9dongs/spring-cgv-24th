@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.spring_cgv_24th.domain.payment.dto.PaymentCancelReqDTO;
 import com.spring_cgv_24th.domain.payment.dto.PaymentPartialCancelReqDTO;
 import com.spring_cgv_24th.domain.payment.dto.PaymentReqDTO;
+import com.spring_cgv_24th.domain.payment.dto.PaymentResDTO;
 import com.spring_cgv_24th.domain.payment.enums.PaymentStatus;
 import com.spring_cgv_24th.domain.payment.enums.PaymentTargetType;
 import com.spring_cgv_24th.domain.payment.gateway.PaymentGateway;
@@ -456,10 +457,19 @@ class ConcurrencyIntegrationTest {
         if (type == PaymentTargetType.RESERVATION) {
             reservationService.createReservation(memberId, new ReservationReqDTO.CreateReservationDTO(screeningId, first.screeningSeatIds()));
         }
-        when(gateway.cancel(anyString(), anyString(), anyString())).thenReturn(cancelled(target));
-        when(gateway.cancel(anyString(), anyString(), anyLong(), anyString())).thenReturn(cancelled(target));
-        var result = finishWithFullCancel ? paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST)
-                : paymentService.cancelPartially(memberId, type, target.id(), partialRequest(target, 2));
+        PaymentResDTO result;
+        if (finishWithFullCancel) {
+            when(gateway.cancel(anyString(), anyString(), anyString())).thenThrow(new PaymentGateway.Failure(false));
+            assertThat(assertThrows(CustomException.class,
+                    () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST)).getErrorCode())
+                    .isEqualTo(ErrorCode.PAYMENT_GATEWAY_ERROR);
+            assertPartialResources(target, 2);
+            when(gateway.find("payment-key")).thenReturn(partiallyCancelled(target, 0));
+            result = paymentService.getPayment(memberId, type, target.id());
+        } else {
+            when(gateway.cancel(anyString(), anyString(), anyLong(), anyString())).thenReturn(partiallyCancelled(target, 0));
+            result = paymentService.cancelPartially(memberId, type, target.id(), partialRequest(target, 2));
+        }
         assertThat(result.status()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(result.balanceAmount()).isZero();
         assertPartialResources(target, 3);
@@ -566,7 +576,7 @@ class ConcurrencyIntegrationTest {
     }
 
     private PaymentGateway.Result partiallyCancelled(Target target, long balance) {
-        return new PaymentGateway.Result("payment-key", target.orderId(), balance == 0 ? "CANCELED" : "PARTIAL_CANCELED",
+        return new PaymentGateway.Result("payment-key", target.orderId(), "PARTIAL_CANCELED",
                 "KRW", target.amount(), balance, "카드", NOW.atZone(ZONE).toOffsetDateTime());
     }
 
