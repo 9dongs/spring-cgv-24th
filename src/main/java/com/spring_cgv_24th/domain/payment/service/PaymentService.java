@@ -29,7 +29,6 @@ import java.util.Objects;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.BiConsumer;
-import java.util.function.Predicate;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -97,7 +96,8 @@ public class PaymentService {
                 result = applyResult(snapshot, gateway.confirm(current.paymentKey(), current.paymentOrderId(),
                         current.amount(), "confirm-" + current.paymentOrderId()));
             } catch (PaymentGateway.Failure failure) {
-                result = handleFailure(snapshot, ignored -> failure.isRejected());
+                FailureReason reason = failure.isRejected() ? FailureReason.APPROVAL_REJECTED : FailureReason.RESULT_UNKNOWN;
+                result = handleFailure(snapshot, reason);
             }
         } else {
             result = refreshPayment(snapshot);
@@ -284,8 +284,9 @@ public class PaymentService {
         try {
             return applyResult(current, gateway.find(current.payment().paymentKey()));
         } catch (PaymentGateway.Failure failure) {
-            return handleFailure(current, target -> failure.isNotFound()
-                    && !current.payment().status().isCancellationPending() && approvalRecoveryExpired(target));
+            FailureReason reason = failure.isNotFound() && !current.payment().status().isCancellationPending()
+                    ? FailureReason.APPROVAL_NOT_FOUND : FailureReason.RESULT_UNKNOWN;
+            return handleFailure(current, reason);
         }
     }
 
@@ -400,12 +401,17 @@ public class PaymentService {
     }
 
     private PaymentResDTO markResultUnknown(PaymentSnapshot current) {
-        return handleFailure(current, ignored -> false);
+        return handleFailure(current, FailureReason.RESULT_UNKNOWN);
     }
 
-    private PaymentResDTO handleFailure(PaymentSnapshot current, Predicate<PaymentTarget> approvalFailed) {
+    private PaymentResDTO handleFailure(PaymentSnapshot current, FailureReason reason) {
         PaymentResDTO result = update(current, (target, payment) -> {
-            if (approvalFailed.test(target)) {
+            boolean approvalFailed = switch (reason) {
+                case APPROVAL_REJECTED -> true;
+                case APPROVAL_NOT_FOUND -> approvalRecoveryExpired(target);
+                case RESULT_UNKNOWN -> false;
+            };
+            if (approvalFailed) {
                 failApproval(target, payment);
             } else {
                 payment.markUnknown();
@@ -453,6 +459,12 @@ public class PaymentService {
 
     private void validateOwner(PaymentTarget target, Long memberId) {
         if (!Objects.equals(target.getMember().getId(), memberId)) throw new CustomException(ErrorCode.PAYMENT_FORBIDDEN);
+    }
+
+    private enum FailureReason {
+        APPROVAL_REJECTED,
+        APPROVAL_NOT_FOUND,
+        RESULT_UNKNOWN
     }
 
     private record PaymentSnapshot(PaymentResDTO payment, Long cancellationId, String cancellationRequestId,
