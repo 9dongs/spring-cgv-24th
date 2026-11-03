@@ -22,6 +22,7 @@ import org.hibernate.type.SqlTypes;
 public class Payment {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "payment_id")
     private Long id;
 
     @Enumerated(EnumType.STRING)

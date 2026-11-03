@@ -696,11 +696,12 @@ class ConcurrencyIntegrationTest {
     @AfterEach
     void cleanUp() {
         Long movieId = jdbc.queryForObject("select movie_id from screening where screening_id = ?", Long.class, screeningId);
-        String cancellations = "select c.id from payment_cancellation c join payment p on c.payment_id = p.id where "
+        String cancellations = "select c.payment_cancellation_id from payment_cancellation c join payment p on c.payment_id = p.payment_id where "
                 + "(p.target_type = 'STORE_ORDER' and p.target_id in (select store_order_id from store_order where theater_id = ?)) or "
                 + "(p.target_type = 'RESERVATION' and p.target_id in (select reservation_id from reservation where member_id = ?))";
-        jdbc.update("delete from payment_cancellation_item where cancellation_id in (" + cancellations + ")", theaterId, memberId);
-        jdbc.update("delete from payment_cancellation where id in (select id from (" + cancellations + ") matched)", theaterId, memberId);
+        jdbc.update("delete from payment_cancellation_item where payment_cancellation_id in (" + cancellations + ")", theaterId, memberId);
+        jdbc.update("delete from payment_cancellation where payment_cancellation_id in (select payment_cancellation_id from ("
+                + cancellations + ") matched)", theaterId, memberId);
         jdbc.update("delete from payment where target_type = 'STORE_ORDER' and target_id in (select store_order_id from store_order where theater_id = ?)", theaterId);
         jdbc.update("delete from payment where target_type = 'RESERVATION' and target_id in (select reservation_id from reservation where member_id = ?)", memberId);
         jdbc.update("delete from store_order_item where product_id = ?", productId);

@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 public class PaymentCancellation {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "payment_cancellation_id")
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -39,7 +40,8 @@ public class PaymentCancellation {
 
     // 매점은 상품 ID·수량, 예매는 상영 좌석 ID·1을 저장한다.
     @ElementCollection
-    @CollectionTable(name = "payment_cancellation_item", joinColumns = @JoinColumn(name = "cancellation_id"))
+    @CollectionTable(name = "payment_cancellation_item",
+            joinColumns = @JoinColumn(name = "payment_cancellation_id"))
     @MapKeyColumn(name = "item_id")
     @Column(name = "quantity", nullable = false)
     private Map<Long, Integer> items = new HashMap<>();
