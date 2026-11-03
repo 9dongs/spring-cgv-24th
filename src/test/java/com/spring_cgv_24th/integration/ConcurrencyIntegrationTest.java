@@ -2,8 +2,10 @@ package com.spring_cgv_24th.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -364,7 +366,7 @@ class ConcurrencyIntegrationTest {
                 () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST));
         when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenReturn(approved(target, target.amount()));
         paymentService.confirm(memberId, type, target.id(), paymentRequest(target));
-        when(gateway.cancel(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+        when(gateway.cancel(anyString(), anyString(), isNull(), anyString())).thenAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             assertResources(target, true);
             setTime(NOW.plusDays(1));
@@ -379,7 +381,7 @@ class ConcurrencyIntegrationTest {
         assertThat(paymentService.getPayment(memberId, type, target.id()).balanceAmount()).isZero();
         assertThat(targetStatus(target)).isEqualTo("CANCELLED");
         assertResources(target, false);
-        verify(gateway, times(1)).cancel("payment-key", "단순 변심", "cancel-" + target.orderId());
+        verify(gateway, times(1)).cancel("payment-key", "단순 변심", null, "cancel-" + target.orderId());
         assertError(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE,
                 () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target)));
     }
@@ -388,7 +390,7 @@ class ConcurrencyIntegrationTest {
     @CsvSource({"STORE_ORDER, TIMEOUT", "RESERVATION, WRONG_BALANCE", "STORE_ORDER, MISSING_BALANCE"})
     void uncertainCancellationKeepsResourcesUntilAutomaticLookupConfirmsIt(PaymentTargetType type, String failure) {
         Target target = paidTarget(type);
-        when(gateway.cancel(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+        when(gateway.cancel(anyString(), anyString(), isNull(), anyString())).thenAnswer(invocation -> {
             if ("TIMEOUT".equals(failure)) throw new PaymentGateway.Failure(false);
             Long balance = "MISSING_BALANCE".equals(failure) ? null : 1L;
             return new PaymentGateway.Result("payment-key", target.orderId(), "CANCELED", "KRW",
@@ -407,13 +409,13 @@ class ConcurrencyIntegrationTest {
 
         assertThat(paymentService.getPayment(memberId, type, target.id()).status()).isEqualTo(PaymentStatus.CANCELLED);
         assertResources(target, false);
-        verify(gateway, times(1)).cancel(anyString(), anyString(), anyString());
+        verify(gateway, times(1)).cancel(anyString(), anyString(), isNull(), anyString());
     }
 
     @Test
     void cancellationRetryReusesTheOriginalReasonAndIdempotencyKey() {
         Target target = paidTarget(PaymentTargetType.STORE_ORDER);
-        when(gateway.cancel(anyString(), anyString(), anyString()))
+        when(gateway.cancel(anyString(), anyString(), isNull(), anyString()))
                 .thenThrow(new PaymentGateway.Failure(false)).thenReturn(cancelled(target));
         assertThrows(CustomException.class, () -> paymentService.cancel(memberId, target.type(), target.id(), CANCEL_REQUEST));
         assertResources(target, true);
@@ -423,7 +425,7 @@ class ConcurrencyIntegrationTest {
         assertThat(result.status()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(result.cancelReason()).isEqualTo("단순 변심");
         assertResources(target, false);
-        verify(gateway, times(2)).cancel("payment-key", "단순 변심", "cancel-" + target.orderId());
+        verify(gateway, times(2)).cancel("payment-key", "단순 변심", null, "cancel-" + target.orderId());
     }
 
     @Test
@@ -435,13 +437,13 @@ class ConcurrencyIntegrationTest {
                 () -> paymentService.cancel(memberId, target.type(), target.id(), CANCEL_REQUEST));
 
         assertResources(target, true);
-        verify(gateway, never()).cancel(anyString(), anyString(), anyString());
+        verify(gateway, never()).cancel(anyString(), anyString(), any(), anyString());
     }
 
     @Test
     void confirmedCancellationRecoversAfterLocalStockUpdateFails() {
         Target target = paidTarget(PaymentTargetType.STORE_ORDER);
-        when(gateway.cancel(anyString(), anyString(), anyString())).thenReturn(cancelled(target));
+        when(gateway.cancel(anyString(), anyString(), isNull(), anyString())).thenReturn(cancelled(target));
         jdbc.update("update theater_stock set quantity = ? where theater_id = ?", Integer.MAX_VALUE, theaterId);
         assertThrows(CustomException.class, () -> paymentService.cancel(memberId, target.type(), target.id(), CANCEL_REQUEST));
         assertThat(targetStatus(target)).isEqualTo("COMPLETED");
@@ -454,13 +456,13 @@ class ConcurrencyIntegrationTest {
 
         assertThat(targetStatus(target)).isEqualTo("CANCELLED");
         assertResources(target, false);
-        verify(gateway, times(1)).cancel(anyString(), anyString(), anyString());
+        verify(gateway, times(1)).cancel(anyString(), anyString(), isNull(), anyString());
     }
 
     // 부분 취소
     @ParameterizedTest
-    @CsvSource({"STORE_ORDER, true", "STORE_ORDER, false", "RESERVATION, true", "RESERVATION, false"})
-    void partialCancellationsKeepBalancesAndRestoreResourcesOnce(PaymentTargetType type, boolean finishWithFullCancel) throws Exception {
+    @EnumSource(PaymentTargetType.class)
+    void concurrentPartialCancellationUsesOriginalPriceAndRestoresResourcesOnce(PaymentTargetType type) throws Exception {
         Target target = paidPartialTarget(type);
         var first = partialRequest(target, 0);
         long amount = partialAmount(target, 0);
@@ -485,16 +487,27 @@ class ConcurrencyIntegrationTest {
                 : partialRequest(target, 0);
         assertError(ErrorCode.PAYMENT_CANCEL_INVALID,
                 () -> paymentService.cancelPartially(memberId, type, target.id(), invalid));
+    }
 
-        long remaining = target.amount() - amount - partialAmount(target, 1);
-        when(gateway.cancel(anyString(), anyString(), anyLong(), anyString())).thenReturn(partiallyCancelled(target, remaining));
-        assertThat(paymentService.cancelPartially(memberId, type, target.id(), partialRequest(target, 1)).balanceAmount()).isEqualTo(remaining);
-        if (type == PaymentTargetType.RESERVATION) {
-            reservationService.createReservation(memberId, new ReservationReqDTO.CreateReservationDTO(screeningId, first.screeningSeatIds()));
+    @ParameterizedTest
+    @CsvSource({"STORE_ORDER, true", "STORE_ORDER, false", "RESERVATION, true", "RESERVATION, false"})
+    void lastCancellationClosesPaymentAndRestoresRemainingResources(PaymentTargetType type, boolean finishWithFullCancel) {
+        Target target = paidPartialTarget(type);
+        long remaining = target.amount();
+        for (int index = 0; index < 2; index++) {
+            remaining -= partialAmount(target, index);
+            when(gateway.cancel(anyString(), anyString(), anyLong(), anyString()))
+                    .thenReturn(partiallyCancelled(target, remaining));
+            assertThat(paymentService.cancelPartially(memberId, type, target.id(), partialRequest(target, index))
+                    .balanceAmount()).isEqualTo(remaining);
         }
+        if (type == PaymentTargetType.RESERVATION) {
+            reservationService.createReservation(memberId, new ReservationReqDTO.CreateReservationDTO(screeningId, List.of(seatId)));
+        }
+
         PaymentResDTO result;
         if (finishWithFullCancel) {
-            when(gateway.cancel(anyString(), anyString(), anyString())).thenThrow(new PaymentGateway.Failure(false));
+            when(gateway.cancel(anyString(), anyString(), isNull(), anyString())).thenThrow(new PaymentGateway.Failure(false));
             assertError(ErrorCode.PAYMENT_GATEWAY_ERROR,
                     () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST));
             assertPartialResources(target, 2);

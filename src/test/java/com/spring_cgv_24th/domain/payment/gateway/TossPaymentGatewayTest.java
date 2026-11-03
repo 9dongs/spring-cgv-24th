@@ -22,6 +22,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
@@ -75,11 +76,11 @@ class TossPaymentGatewayTest {
         server.expect(requestTo("https://api.tosspayments.com/v1/payments/payment-key/cancel"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("Idempotency-Key", "cancel-store-order"))
-                .andExpect(content().json("{\"cancelReason\":\"단순 변심\"}"))
+                .andExpect(content().json("{\"cancelReason\":\"단순 변심\"}", JsonCompareMode.STRICT))
                 .andRespond(withSuccess(RESPONSE.replace("\"DONE\"", "\"CANCELED\"")
                         .replace("\"balanceAmount\":10000", "\"balanceAmount\":0"), MediaType.APPLICATION_JSON));
 
-        var result = gateway.cancel("payment-key", "단순 변심", "cancel-store-order");
+        var result = gateway.cancel("payment-key", "단순 변심", null, "cancel-store-order");
 
         assertThat(result.status()).isEqualTo("CANCELED");
         assertThat(result.balanceAmount()).isZero();
@@ -94,7 +95,7 @@ class TossPaymentGatewayTest {
                 .andRespond(withSuccess(RESPONSE.replace("\"DONE\"", "\"PARTIAL_CANCELED\"")
                         .replace("\"balanceAmount\":10000", "\"balanceAmount\":7000"), MediaType.APPLICATION_JSON));
 
-        assertThat(gateway.cancel("payment-key", "상품 일부 취소", 3000, "cancel-request-1").balanceAmount())
+        assertThat(gateway.cancel("payment-key", "상품 일부 취소", 3000L, "cancel-request-1").balanceAmount())
                 .isEqualTo(7000);
     }
 

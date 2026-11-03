@@ -240,9 +240,8 @@ public class PaymentService {
 
         PaymentResDTO result;
         try {
-            PaymentGateway.Result response = snapshot.cancelAmount() == null
-                    ? gateway.cancel(current.paymentKey(), current.cancelReason(), key)
-                    : gateway.cancel(current.paymentKey(), current.cancelReason(), snapshot.cancelAmount(), key);
+            PaymentGateway.Result response = gateway.cancel(
+                    current.paymentKey(), current.cancelReason(), snapshot.cancelAmount(), key);
             result = applyResult(snapshot, response);
         } catch (PaymentGateway.Failure failure) {
             result = failure.isRejected() ? reconcileRejectedCancellation(snapshot) : markResultUnknown(snapshot);

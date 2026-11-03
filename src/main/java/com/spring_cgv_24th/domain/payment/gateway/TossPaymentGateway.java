@@ -1,6 +1,7 @@
 package com.spring_cgv_24th.domain.payment.gateway;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.Set;
 import java.util.function.Supplier;
 import org.springframework.http.MediaType;
@@ -40,20 +41,11 @@ public class TossPaymentGateway implements PaymentGateway {
     }
 
     @Override
-    public Result cancel(String paymentKey, String cancelReason, String idempotencyKey) {
-        return cancel(paymentKey, new CancelBody(cancelReason), idempotencyKey);
-    }
-
-    @Override
-    public Result cancel(String paymentKey, String cancelReason, long cancelAmount, String idempotencyKey) {
-        return cancel(paymentKey, new PartialCancelBody(cancelReason, cancelAmount), idempotencyKey);
-    }
-
-    private Result cancel(String paymentKey, Object body, String idempotencyKey) {
+    public Result cancel(String paymentKey, String cancelReason, Long cancelAmount, String idempotencyKey) {
         return execute(() -> client.post().uri("/v1/payments/{paymentKey}/cancel", paymentKey)
                 .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
+                .body(new CancelBody(cancelReason, cancelAmount))
                 .retrieve().body(Result.class), CANCELLATION_REJECTION_CODES, false);
     }
 
@@ -81,10 +73,7 @@ public class TossPaymentGateway implements PaymentGateway {
     private record ConfirmBody(String paymentKey, String orderId, long amount) {
     }
 
-    private record CancelBody(String cancelReason) {
-    }
-
-    private record PartialCancelBody(String cancelReason, long cancelAmount) {
+    private record CancelBody(String cancelReason, @JsonInclude(JsonInclude.Include.NON_NULL) Long cancelAmount) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
