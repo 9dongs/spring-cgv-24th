@@ -21,6 +21,7 @@ import com.spring_cgv_24th.domain.payment.service.PaymentService;
 import com.spring_cgv_24th.domain.reservation.dto.ReservationReqDTO;
 import com.spring_cgv_24th.domain.reservation.service.ReservationService;
 import com.spring_cgv_24th.domain.store.dto.StoreOrderReqDTO;
+import com.spring_cgv_24th.domain.store.dto.StoreOrderResDTO;
 import com.spring_cgv_24th.domain.store.service.StoreService;
 import com.spring_cgv_24th.global.exception.CustomException;
 import com.spring_cgv_24th.global.exception.ErrorCode;
@@ -40,6 +41,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -69,7 +71,7 @@ class ConcurrencyIntegrationTest {
     @BeforeEach
     void setUp() {
         when(clock.getZone()).thenReturn(ZONE);
-        when(clock.instant()).thenReturn(NOW.atZone(ZONE).toInstant());
+        setTime(NOW);
         memberId = insert("insert into member (email, name, password_hash, role) values (?, '동시성 회원', 'unused', 'USER')",
                 UUID.randomUUID() + "@test.local");
         theaterId = insert("insert into theater (name, address) values ('동시성 영화관', '테스트')");
@@ -85,6 +87,7 @@ class ConcurrencyIntegrationTest {
                 theaterId, productId);
     }
 
+    // 좌석과 재고 동시성
     @Test
     void sameSeatCanOnlyBeReservedOnce() throws Exception {
         var request = new ReservationReqDTO.CreateReservationDTO(screeningId, List.of(seatId));
@@ -100,9 +103,8 @@ class ConcurrencyIntegrationTest {
 
     @Test
     void concurrentOrdersKeepStockAndPurchasedQuantityConsistent() throws Exception {
-        var request = new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 1)));
 
-        var results = runTogether(10, () -> storeService.createOrder(theaterId, memberId, request));
+        var results = runTogether(10, () -> createOrder(1));
 
         assertResults(results, 5, ErrorCode.STORE_STOCK_INSUFFICIENT);
         assertThat(count("select quantity from theater_stock where theater_id = ?", theaterId)).isEqualTo(1);
@@ -114,9 +116,8 @@ class ConcurrencyIntegrationTest {
     @CsvSource({"9, 4, PENDING_PAYMENT", "10, 6, EXPIRED"})
     void concurrentExpirationRestoresStockOnlyOnceAfterTenMinutes(
             int elapsedMinutes, int expectedStock, String expectedStatus) throws Exception {
-        var request = new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 2)));
-        long orderId = storeService.createOrder(theaterId, memberId, request).orderId();
-        when(clock.instant()).thenReturn(NOW.plusMinutes(elapsedMinutes).atZone(ZONE).toInstant());
+        long orderId = createOrder(2).orderId();
+        setTime(NOW.plusMinutes(elapsedMinutes));
 
         var results = runTogether(10, () -> {
             storeService.releaseUnpaidOrderStock();
@@ -132,14 +133,13 @@ class ConcurrencyIntegrationTest {
 
     @Test
     void oneFailedStockRestoreDoesNotRollBackAnotherOrder() {
-        var request = new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 2)));
-        long first = storeService.createOrder(theaterId, memberId, request).orderId();
-        long second = storeService.createOrder(theaterId, memberId, request).orderId();
+        long first = createOrder(2).orderId();
+        long second = createOrder(2).orderId();
         long missingStockProduct = insert("insert into product (name, price) values ('재고 없음', 5000)");
         try {
             insert("insert into store_order_item (order_id, product_id, quantity, unit_price) values (?, ?, 1, 5000)",
                     first, missingStockProduct);
-            when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
+            setTime(NOW.plusMinutes(10));
 
             storeService.releaseUnpaidOrderStock();
 
@@ -155,10 +155,9 @@ class ConcurrencyIntegrationTest {
 
     @Test
     void completedOrdersDoNotExpireOrRestoreStock() {
-        var request = new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 2)));
-        long orderId = storeService.createOrder(theaterId, memberId, request).orderId();
+        long orderId = createOrder(2).orderId();
         jdbc.update("update store_order set status = 'COMPLETED', expires_at = null where store_order_id = ?", orderId);
-        when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
+        setTime(NOW.plusMinutes(10));
 
         storeService.releaseUnpaidOrderStock();
 
@@ -171,7 +170,7 @@ class ConcurrencyIntegrationTest {
     @CsvSource({"9, 1, PENDING_PAYMENT", "10, 0, EXPIRED"})
     void unpaidReservationReleasesSeatsOnlyAfterTenMinutes(int minutes, int occupied, String status) throws Exception {
         Target target = paymentTarget(PaymentTargetType.RESERVATION);
-        when(clock.instant()).thenReturn(NOW.plusMinutes(minutes).atZone(ZONE).toInstant());
+        setTime(NOW.plusMinutes(minutes));
 
         assertThat(runTogether(10, () -> { reservationService.releaseUnpaidSeats(); return null; })).containsOnlyNulls();
         reservationService.releaseUnpaidSeats();
@@ -181,23 +180,22 @@ class ConcurrencyIntegrationTest {
         assertThat(targetStatus(target)).isEqualTo(status);
     }
 
+    // 결제 승인과 복구
     @ParameterizedTest
     @EnumSource(PaymentTargetType.class)
     void invalidPaymentRequestsAreRejectedBeforeCallingToss(PaymentTargetType type) {
         Target target = paymentTarget(type);
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.confirm(memberId + 1, type, target.id(), paymentRequest(target))).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_FORBIDDEN);
-        assertThat(assertThrows(CustomException.class, () -> paymentService.confirm(memberId, type, target.id(),
-                new PaymentReqDTO("payment-key", target.orderId(), 1L))).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_AMOUNT_MISMATCH);
-        assertThat(assertThrows(CustomException.class, () -> paymentService.confirm(memberId, type, target.id(),
-                new PaymentReqDTO("payment-key", "another-order", target.amount()))).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_REQUEST_CONFLICT);
-        when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target))).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE);
+        assertError(ErrorCode.PAYMENT_FORBIDDEN,
+                () -> paymentService.confirm(memberId + 1, type, target.id(), paymentRequest(target)));
+        assertError(ErrorCode.PAYMENT_AMOUNT_MISMATCH,
+                () -> paymentService.confirm(memberId, type, target.id(),
+                new PaymentReqDTO("payment-key", target.orderId(), 1L)));
+        assertError(ErrorCode.PAYMENT_REQUEST_CONFLICT,
+                () -> paymentService.confirm(memberId, type, target.id(),
+                new PaymentReqDTO("payment-key", "another-order", target.amount())));
+        setTime(NOW.plusMinutes(10));
+        assertError(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE,
+                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target)));
         verifyNoInteractions(gateway);
     }
 
@@ -207,13 +205,12 @@ class ConcurrencyIntegrationTest {
         Target target = paymentTarget(type);
         when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-            when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
+            setTime(NOW.plusMinutes(10));
             releaseUnpaidResources();
             assertResources(target, true);
             if (type == PaymentTargetType.RESERVATION) {
-                assertThat(assertThrows(CustomException.class,
-                        () -> reservationService.cancelReservation(target.id(), memberId)).getErrorCode())
-                        .isEqualTo(ErrorCode.RESERVATION_PAYMENT_CANCELLATION_REQUIRED);
+                assertError(ErrorCode.RESERVATION_PAYMENT_CANCELLATION_REQUIRED,
+                        () -> reservationService.cancelReservation(target.id(), memberId));
             }
             return approved(target, target.amount());
         });
@@ -226,16 +223,14 @@ class ConcurrencyIntegrationTest {
         assertThat(paymentService.confirm(memberId, type, target.id(), paymentRequest(target)).amount()).isEqualTo(target.amount());
         verify(gateway, times(1)).confirm("payment-key", target.orderId(), target.amount(), "confirm-" + target.orderId());
         if (type == PaymentTargetType.RESERVATION) {
-            assertThat(assertThrows(CustomException.class,
-                    () -> reservationService.cancelReservation(target.id(), memberId)).getErrorCode())
-                    .isEqualTo(ErrorCode.RESERVATION_PAYMENT_CANCELLATION_REQUIRED);
+            assertError(ErrorCode.RESERVATION_PAYMENT_CANCELLATION_REQUIRED,
+                    () -> reservationService.cancelReservation(target.id(), memberId));
             assertResources(target, true);
         }
         Target other = paymentTarget(type == PaymentTargetType.RESERVATION
                 ? PaymentTargetType.STORE_ORDER : PaymentTargetType.RESERVATION);
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.confirm(memberId, other.type(), other.id(), paymentRequest(other))).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_REQUEST_CONFLICT);
+        assertError(ErrorCode.PAYMENT_REQUEST_CONFLICT,
+                () -> paymentService.confirm(memberId, other.type(), other.id(), paymentRequest(other)));
     }
 
     @ParameterizedTest
@@ -244,9 +239,8 @@ class ConcurrencyIntegrationTest {
         Target target = paymentTarget(type);
         when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenThrow(new PaymentGateway.Failure(true));
 
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target))).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_CONFIRMATION_FAILED);
+        assertError(ErrorCode.PAYMENT_CONFIRMATION_FAILED,
+                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target)));
         assertThat(targetStatus(target)).isEqualTo("PAYMENT_FAILED");
         assertResources(target, true);
 
@@ -266,10 +260,9 @@ class ConcurrencyIntegrationTest {
             if (invalidResponse) return approved(target, 1);
             throw new PaymentGateway.Failure(false);
         });
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target))).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_GATEWAY_ERROR);
-        when(clock.instant()).thenReturn(NOW.plusMinutes(11).atZone(ZONE).toInstant());
+        assertError(ErrorCode.PAYMENT_GATEWAY_ERROR,
+                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target)));
+        setTime(NOW.plusMinutes(11));
         releaseUnpaidResources();
         assertThat(targetStatus(target)).isEqualTo("PAYMENT_PROCESSING");
         assertResources(target, true);
@@ -293,7 +286,7 @@ class ConcurrencyIntegrationTest {
         when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenThrow(new PaymentGateway.Failure(false));
         assertThrows(CustomException.class, () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target)));
         jdbc.update("update payment set status = ? where target_type = ? and target_id = ?", initialStatus, type.name(), target.id());
-        when(clock.instant()).thenReturn(NOW.plusMinutes(9).atZone(ZONE).toInstant());
+        setTime(NOW.plusMinutes(9));
         paymentService.recoverUnresolvedPayments();
         verify(gateway, never()).find(anyString());
 
@@ -303,7 +296,7 @@ class ConcurrencyIntegrationTest {
             if (responseStatus.equals("DONE")) return approved(target, target.amount());
             return new PaymentGateway.Result("payment-key", target.orderId(), responseStatus, "KRW", target.amount(), 0L, null, null);
         });
-        when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
+        setTime(NOW.plusMinutes(10));
         paymentService.recoverUnresolvedPayments();
         releaseUnpaidResources();
         paymentService.recoverUnresolvedPayments();
@@ -325,12 +318,12 @@ class ConcurrencyIntegrationTest {
         when(gateway.find("payment-key"))
                 .thenThrow(new PaymentGateway.Failure(PaymentGateway.Failure.Kind.NOT_FOUND));
 
-        when(clock.instant()).thenReturn(NOW.plusMinutes(39).atZone(ZONE).toInstant());
+        setTime(NOW.plusMinutes(39));
         paymentService.recoverUnresolvedPayments();
         releaseUnpaidResources();
         assertResources(target, true);
 
-        when(clock.instant()).thenReturn(NOW.plusMinutes(40).atZone(ZONE).toInstant());
+        setTime(NOW.plusMinutes(40));
         paymentService.recoverUnresolvedPayments();
         releaseUnpaidResources();
         assertThat(paymentService.getPayment(memberId, type, target.id()).status()).isEqualTo(PaymentStatus.FAILED);
@@ -350,7 +343,7 @@ class ConcurrencyIntegrationTest {
         when(gateway.find("reservation-payment-key")).thenReturn(new PaymentGateway.Result(
                 "reservation-payment-key", reservation.orderId(), "DONE", "KRW", reservation.amount(), reservation.amount(),
                 "카드", NOW.atZone(ZONE).toOffsetDateTime()));
-        when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
+        setTime(NOW.plusMinutes(10));
 
         paymentService.recoverUnresolvedPayments();
 
@@ -360,22 +353,21 @@ class ConcurrencyIntegrationTest {
         assertResources(reservation, true);
     }
 
+    // 전체 취소
     @ParameterizedTest
     @EnumSource(PaymentTargetType.class)
     void fullCancellationRestoresResourcesOnlyOnce(PaymentTargetType type) throws Exception {
         Target target = paymentTarget(type);
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.cancel(memberId + 1, type, target.id(), CANCEL_REQUEST)).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_FORBIDDEN);
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST)).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
+        assertError(ErrorCode.PAYMENT_FORBIDDEN,
+                () -> paymentService.cancel(memberId + 1, type, target.id(), CANCEL_REQUEST));
+        assertError(ErrorCode.PAYMENT_NOT_FOUND,
+                () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST));
         when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenReturn(approved(target, target.amount()));
         paymentService.confirm(memberId, type, target.id(), paymentRequest(target));
         when(gateway.cancel(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             assertResources(target, true);
-            when(clock.instant()).thenReturn(NOW.plusDays(1).atZone(ZONE).toInstant());
+            setTime(NOW.plusDays(1));
             return cancelled(target);
         });
 
@@ -388,9 +380,8 @@ class ConcurrencyIntegrationTest {
         assertThat(targetStatus(target)).isEqualTo("CANCELLED");
         assertResources(target, false);
         verify(gateway, times(1)).cancel("payment-key", "단순 변심", "cancel-" + target.orderId());
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target))).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE);
+        assertError(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE,
+                () -> paymentService.confirm(memberId, type, target.id(), paymentRequest(target)));
     }
 
     @ParameterizedTest
@@ -403,9 +394,8 @@ class ConcurrencyIntegrationTest {
             return new PaymentGateway.Result("payment-key", target.orderId(), "CANCELED", "KRW",
                     target.amount(), balance, "카드", NOW.atZone(ZONE).toOffsetDateTime());
         });
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST)).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_GATEWAY_ERROR);
+        assertError(ErrorCode.PAYMENT_GATEWAY_ERROR,
+                () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST));
         when(gateway.find("payment-key")).thenReturn(approved(target, target.amount()));
         assertThat(paymentService.getPayment(memberId, type, target.id()).status()).isEqualTo(PaymentStatus.CANCEL_UNKNOWN);
         releaseUnpaidResources();
@@ -439,11 +429,10 @@ class ConcurrencyIntegrationTest {
     @Test
     void paidReservationCannotBeCancelledAfterScreeningStarts() {
         Target target = paidTarget(PaymentTargetType.RESERVATION);
-        when(clock.instant()).thenReturn(NOW.plusDays(1).atZone(ZONE).toInstant());
+        setTime(NOW.plusDays(1));
 
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.cancel(memberId, target.type(), target.id(), CANCEL_REQUEST)).getErrorCode())
-                .isEqualTo(ErrorCode.RESERVATION_CANCELLATION_CLOSED);
+        assertError(ErrorCode.RESERVATION_CANCELLATION_CLOSED,
+                () -> paymentService.cancel(memberId, target.type(), target.id(), CANCEL_REQUEST));
 
         assertResources(target, true);
         verify(gateway, never()).cancel(anyString(), anyString(), anyString());
@@ -468,6 +457,7 @@ class ConcurrencyIntegrationTest {
         verify(gateway, times(1)).cancel(anyString(), anyString(), anyString());
     }
 
+    // 부분 취소
     @ParameterizedTest
     @CsvSource({"STORE_ORDER, true", "STORE_ORDER, false", "RESERVATION, true", "RESERVATION, false"})
     void partialCancellationsKeepBalancesAndRestoreResourcesOnce(PaymentTargetType type, boolean finishWithFullCancel) throws Exception {
@@ -488,15 +478,13 @@ class ConcurrencyIntegrationTest {
         assertPartialResources(target, 1);
         verify(gateway, times(1)).cancel("payment-key", first.cancelReason(), amount, partialKey(target, first));
         var changed = new PaymentPartialCancelReqDTO(first.requestId(), "다른 내용", first.items(), first.screeningSeatIds());
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.cancelPartially(memberId, type, target.id(), changed)).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_CANCEL_REQUEST_CONFLICT);
+        assertError(ErrorCode.PAYMENT_CANCEL_REQUEST_CONFLICT,
+                () -> paymentService.cancelPartially(memberId, type, target.id(), changed));
         var invalid = type == PaymentTargetType.STORE_ORDER
                 ? new PaymentPartialCancelReqDTO(UUID.randomUUID(), "초과 수량", List.of(new PaymentPartialCancelReqDTO.Item(productId, 3)), null)
                 : partialRequest(target, 0);
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.cancelPartially(memberId, type, target.id(), invalid)).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_CANCEL_INVALID);
+        assertError(ErrorCode.PAYMENT_CANCEL_INVALID,
+                () -> paymentService.cancelPartially(memberId, type, target.id(), invalid));
 
         long remaining = target.amount() - amount - partialAmount(target, 1);
         when(gateway.cancel(anyString(), anyString(), anyLong(), anyString())).thenReturn(partiallyCancelled(target, remaining));
@@ -507,9 +495,8 @@ class ConcurrencyIntegrationTest {
         PaymentResDTO result;
         if (finishWithFullCancel) {
             when(gateway.cancel(anyString(), anyString(), anyString())).thenThrow(new PaymentGateway.Failure(false));
-            assertThat(assertThrows(CustomException.class,
-                    () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST)).getErrorCode())
-                    .isEqualTo(ErrorCode.PAYMENT_GATEWAY_ERROR);
+            assertError(ErrorCode.PAYMENT_GATEWAY_ERROR,
+                    () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST));
             assertPartialResources(target, 2);
             when(gateway.find("payment-key")).thenReturn(partiallyCancelled(target, 0));
             result = paymentService.getPayment(memberId, type, target.id());
@@ -537,14 +524,12 @@ class ConcurrencyIntegrationTest {
         when(gateway.find("payment-key")).thenReturn(approved(target, target.amount()));
         assertThat(paymentService.getPayment(memberId, type, target.id()).status()).isEqualTo(PaymentStatus.CANCEL_UNKNOWN);
         assertPartialResources(target, 0);
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.cancelPartially(memberId, type, target.id(), partialRequest(target, 1))).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_PENDING);
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST)).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_PENDING);
+        assertError(ErrorCode.PAYMENT_PENDING,
+                () -> paymentService.cancelPartially(memberId, type, target.id(), partialRequest(target, 1)));
+        assertError(ErrorCode.PAYMENT_PENDING,
+                () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST));
 
-        if (type == PaymentTargetType.RESERVATION) when(clock.instant()).thenReturn(NOW.plusDays(1).atZone(ZONE).toInstant());
+        if (type == PaymentTargetType.RESERVATION) setTime(NOW.plusDays(1));
         assertThat(paymentService.cancelPartially(memberId, type, target.id(), request).balanceAmount())
                 .isEqualTo(target.amount() - amount);
         assertPartialResources(target, 1);
@@ -566,9 +551,8 @@ class ConcurrencyIntegrationTest {
         assertThrows(CustomException.class, () -> paymentService.cancelPartially(memberId, type, target.id(), first));
         paymentService.recoverUnresolvedPayments();
         assertPartialResources(target, 0);
-        assertThat(assertThrows(CustomException.class,
-                () -> paymentService.cancelPartially(memberId, type, target.id(), first)).getErrorCode())
-                .isEqualTo(ErrorCode.PAYMENT_CANCELLATION_REJECTED);
+        assertError(ErrorCode.PAYMENT_CANCELLATION_REJECTED,
+                () -> paymentService.cancelPartially(memberId, type, target.id(), first));
         assertThat(paymentService.cancelPartially(memberId, type, target.id(), next).status())
                 .isEqualTo(PaymentStatus.PARTIALLY_CANCELLED);
         verify(gateway, times(2)).cancel(anyString(), anyString(), anyLong(), anyString());
@@ -609,21 +593,12 @@ class ConcurrencyIntegrationTest {
     }
 
     private Target paidPartialTarget(PaymentTargetType type) {
-        Target target;
         if (type == PaymentTargetType.STORE_ORDER) {
-            var order = storeService.createOrder(theaterId, memberId,
-                    new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 3))));
-            target = new Target(type, order.orderId(), order.paymentOrderId(), order.totalPrice());
-        } else {
-            long second = insert("insert into screening_seat (screening_id, row_no, column_no, price) values (?, 1, 2, 10000)", screeningId);
-            long third = insert("insert into screening_seat (screening_id, row_no, column_no, price) values (?, 1, 3, 8000)", screeningId);
-            var reservation = reservationService.createReservation(memberId,
-                    new ReservationReqDTO.CreateReservationDTO(screeningId, List.of(seatId, second, third)));
-            target = new Target(type, reservation.reservationId(), reservation.paymentOrderId(), reservation.totalPrice());
+            return approve(orderTarget(3));
         }
-        when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenReturn(approved(target, target.amount()));
-        paymentService.confirm(memberId, type, target.id(), paymentRequest(target));
-        return target;
+        long second = insert("insert into screening_seat (screening_id, row_no, column_no, price) values (?, 1, 2, 10000)", screeningId);
+        long third = insert("insert into screening_seat (screening_id, row_no, column_no, price) values (?, 1, 3, 8000)", screeningId);
+        return approve(reservationTarget(List.of(seatId, second, third)));
     }
 
     private PaymentPartialCancelReqDTO partialRequest(Target target, int index) {
@@ -661,9 +636,12 @@ class ConcurrencyIntegrationTest {
     }
 
     private Target paidTarget(PaymentTargetType type) {
-        Target target = paymentTarget(type);
+        return approve(paymentTarget(type));
+    }
+
+    private Target approve(Target target) {
         when(gateway.confirm(anyString(), anyString(), anyLong(), anyString())).thenReturn(approved(target, target.amount()));
-        paymentService.confirm(memberId, type, target.id(), paymentRequest(target));
+        paymentService.confirm(memberId, target.type(), target.id(), paymentRequest(target));
         return target;
     }
 
@@ -673,14 +651,18 @@ class ConcurrencyIntegrationTest {
     }
 
     private Target paymentTarget(PaymentTargetType type) {
-        if (type == PaymentTargetType.STORE_ORDER) {
-            var order = storeService.createOrder(theaterId, memberId,
-                    new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 2))));
-            return new Target(type, order.orderId(), order.paymentOrderId(), order.totalPrice());
-        }
+        return type == PaymentTargetType.STORE_ORDER ? orderTarget(2) : reservationTarget(List.of(seatId));
+    }
+
+    private Target orderTarget(int quantity) {
+        var order = createOrder(quantity);
+        return new Target(PaymentTargetType.STORE_ORDER, order.orderId(), order.paymentOrderId(), order.totalPrice());
+    }
+
+    private Target reservationTarget(List<Long> seatIds) {
         var reservation = reservationService.createReservation(memberId,
-                new ReservationReqDTO.CreateReservationDTO(screeningId, List.of(seatId)));
-        return new Target(type, reservation.reservationId(), reservation.paymentOrderId(), reservation.totalPrice());
+                new ReservationReqDTO.CreateReservationDTO(screeningId, seatIds));
+        return new Target(PaymentTargetType.RESERVATION, reservation.reservationId(), reservation.paymentOrderId(), reservation.totalPrice());
     }
 
     private PaymentReqDTO paymentRequest(Target target) {
@@ -744,6 +726,19 @@ class ConcurrencyIntegrationTest {
         }
     }
 
+    private void setTime(LocalDateTime time) {
+        when(clock.instant()).thenReturn(time.atZone(ZONE).toInstant());
+    }
+
+    private StoreOrderResDTO createOrder(int quantity) {
+        var item = new StoreOrderReqDTO.OrderItemDTO(productId, quantity);
+        return storeService.createOrder(theaterId, memberId, new StoreOrderReqDTO.CreateOrderDTO(List.of(item)));
+    }
+
+    private void assertError(ErrorCode expected, Executable request) {
+        assertThat(assertThrows(CustomException.class, request).getErrorCode()).isEqualTo(expected);
+    }
+
     private void assertResults(List<ErrorCode> results, int successes, ErrorCode failure) {
         assertThat(results.stream().filter(Objects::isNull).count()).isEqualTo(successes);
         assertThat(results.stream().filter(Objects::nonNull)).containsOnly(failure);
@@ -766,9 +761,14 @@ class ConcurrencyIntegrationTest {
     @AfterEach
     void cleanUp() {
         Long movieId = jdbc.queryForObject("select movie_id from screening where screening_id = ?", Long.class, screeningId);
-        String cancellations = "select c.payment_cancellation_id from payment_cancellation c join payment p on c.payment_id = p.payment_id where "
-                + "(p.target_type = 'STORE_ORDER' and p.target_id in (select store_order_id from store_order where theater_id = ?)) or "
-                + "(p.target_type = 'RESERVATION' and p.target_id in (select reservation_id from reservation where member_id = ?))";
+        String cancellations = """
+                select c.payment_cancellation_id
+                from payment_cancellation c join payment p on c.payment_id = p.payment_id
+                where (p.target_type = 'STORE_ORDER' and p.target_id in (
+                    select store_order_id from store_order where theater_id = ?))
+                or (p.target_type = 'RESERVATION' and p.target_id in (
+                    select reservation_id from reservation where member_id = ?))
+                """;
         jdbc.update("delete from payment_cancellation_item where payment_cancellation_id in (" + cancellations + ")", theaterId, memberId);
         jdbc.update("delete from payment_cancellation where payment_cancellation_id in (select payment_cancellation_id from ("
                 + cancellations + ") matched)", theaterId, memberId);

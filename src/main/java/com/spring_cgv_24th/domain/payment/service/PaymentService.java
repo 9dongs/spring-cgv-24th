@@ -29,6 +29,7 @@ import java.util.Objects;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -44,6 +45,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class PaymentService {
     // 승인 요청 직후의 조회 결과로 만료를 확정하지 않도록 토스 결제 유효 시간만큼 기다린다.
     private static final long MISSING_PAYMENT_GRACE_MINUTES = 30;
+    private static final String FULL_CANCELLATION = "FULL";
     private final StoreOrderRepository orderRepository;
     private final StoreOrderItemRepository itemRepository;
     private final ReservationRepository reservationRepository;
@@ -70,7 +72,7 @@ public class PaymentService {
     }
 
     public PaymentResDTO confirm(Long memberId, PaymentTargetType type, Long targetId, PaymentReqDTO request) {
-        Prepared prepared;
+        PreparedPayment prepared;
         try {
             prepared = transaction.execute(status -> prepare(memberId, type, targetId, request));
         } catch (DataIntegrityViolationException error) {
@@ -90,12 +92,12 @@ public class PaymentService {
 
         // PG 호출은 준비 트랜잭션의 잠금을 해제한 뒤 실행한다.
         PaymentResDTO result;
-        if (prepared.approve()) {
+        if (prepared.submit()) {
             try {
                 result = applyResult(snapshot, gateway.confirm(current.paymentKey(), current.paymentOrderId(),
                         current.amount(), "confirm-" + current.paymentOrderId()));
             } catch (PaymentGateway.Failure failure) {
-                result = handleFailure(snapshot, failure.isRejected());
+                result = handleFailure(snapshot, ignored -> failure.isRejected());
             }
         } else {
             result = refreshPayment(snapshot);
@@ -128,57 +130,88 @@ public class PaymentService {
                 prepareCancellation(memberId, type, targetId, request.cancelReason(), request)));
     }
 
-    private PreparedCancellation prepareCancellation(Long memberId, PaymentTargetType type, Long targetId,
+    private PreparedPayment prepareCancellation(Long memberId, PaymentTargetType type, Long targetId,
                                                      String reason, PaymentPartialCancelReqDTO partial) {
         PaymentTarget target = findTarget(type, targetId, true);
         validateOwner(target, memberId);
         Payment payment = requirePayment(type, targetId);
-        String requestId = partial == null ? "FULL" : partial.requestId().toString();
-        Map<Long, Integer> items = partial == null ? Map.of() : cancellationItems(type, partial);
-        PaymentCancellation cancellation = payment.getCancellations().reversed().stream()
-                .filter(item -> partial == null ? item.isFullCancellation() : item.getRequestId().equals(requestId))
+        boolean full = partial == null;
+        String requestId = full ? FULL_CANCELLATION : partial.requestId().toString();
+        Map<Long, Integer> items = full ? Map.of() : cancellationItems(type, partial);
+        PaymentCancellation existing = payment.getCancellations().reversed().stream()
+                .filter(item -> full ? item.isFullCancellation() : item.getRequestId().equals(requestId))
                 .findFirst().orElse(null);
-        if (partial == null && cancellation != null && cancellation.getFailedAt() != null) {
-            cancellation = null;
+
+        if (existing != null && (!full || existing.getFailedAt() == null)) {
+            return resumeCancellation(payment, existing, reason, items, full);
         }
-        if (cancellation != null) {
-            if (partial != null && (!cancellation.getItems().equals(items) || !cancellation.getCancelReason().equals(reason))) {
-                throw new CustomException(ErrorCode.PAYMENT_CANCEL_REQUEST_CONFLICT);
-            }
-            if (cancellation.getFailedAt() != null) {
-                throw new CustomException(ErrorCode.PAYMENT_CANCELLATION_REJECTED);
-            }
-            if (cancellation.getCompletedAt() != null) return new PreparedCancellation(PaymentSnapshot.from(payment), false);
-            if (payment.getStatus() == PaymentStatus.CANCEL_PROCESSING
-                    || payment.getStatus() == PaymentStatus.CANCEL_REJECTED_VERIFY) throw new CustomException(ErrorCode.PAYMENT_PENDING);
-        } else {
-            if (partial == null && payment.getStatus() == PaymentStatus.CANCELLED) {
-                return new PreparedCancellation(PaymentSnapshot.from(payment), false);
-            }
-            // 기존 전체 취소의 미확정 요청도 같은 멱등키로 이어간다.
-            boolean legacyRetry = partial == null && payment.getCancellations().isEmpty()
-                    && payment.getStatus() == PaymentStatus.CANCEL_UNKNOWN;
-            if (!legacyRetry) {
-                if (payment.getStatus().isCancellationPending()) throw new CustomException(ErrorCode.PAYMENT_PENDING);
-                if (payment.getStatus() != PaymentStatus.COMPLETED && payment.getStatus() != PaymentStatus.PARTIALLY_CANCELLED) {
-                    throw new CustomException(ErrorCode.PAYMENT_NOT_CANCELLABLE);
-                }
-                target.validatePaymentCancellation(LocalDateTime.now(clock));
-            }
-            long amount = partial == null ? payment.getBalanceAmount() : target instanceof Reservation reservation
-                    ? reservationService.calculateCancellationAmount(reservation, items)
-                    : storeService.calculateCancellationAmount((StoreOrder) target, items);
-            if (amount <= 0 || amount > payment.getBalanceAmount()) throw new CustomException(ErrorCode.PAYMENT_CANCEL_INVALID);
-            String newRequestId = partial == null && payment.getCancellations().stream()
-                    .anyMatch(PaymentCancellation::isFullCancellation) ? UUID.randomUUID().toString() : requestId;
-            cancellation = new PaymentCancellation(payment, newRequestId, legacyRetry ? payment.getCancelReason() : reason,
-                    amount, partial == null, items, clock.instant());
-            payment.addCancellation(cancellation);
-            paymentRepository.saveAndFlush(payment);
+        if (full && payment.getStatus() == PaymentStatus.CANCELLED) {
+            return new PreparedPayment(PaymentSnapshot.from(payment), false);
         }
-        // 최초 접수 때 검사한 상영 시각은 같은 요청의 재시도에서 다시 검사하지 않는다.
+
+        String newRequestId = existing == null ? requestId : UUID.randomUUID().toString();
+        return createCancellation(target, payment, newRequestId, reason, full, items);
+    }
+
+    private PreparedPayment resumeCancellation(Payment payment, PaymentCancellation existing,
+                                                     String reason, Map<Long, Integer> items, boolean full) {
+        if (!full
+                && (!existing.getItems().equals(items) || !existing.getCancelReason().equals(reason))) {
+            throw new CustomException(ErrorCode.PAYMENT_CANCEL_REQUEST_CONFLICT);
+        }
+        if (existing.getFailedAt() != null) {
+            throw new CustomException(ErrorCode.PAYMENT_CANCELLATION_REJECTED);
+        }
+        if (existing.getCompletedAt() != null) {
+            return new PreparedPayment(PaymentSnapshot.from(payment), false);
+        }
+        if (payment.getStatus() == PaymentStatus.CANCEL_PROCESSING
+                || payment.getStatus() == PaymentStatus.CANCEL_REJECTED_VERIFY) {
+            throw new CustomException(ErrorCode.PAYMENT_PENDING);
+        }
+
+        // 재시도는 최초 접수 시점의 취소 사유와 검증 결과를 사용한다.
+        return beginCancellation(payment, existing);
+    }
+
+    private PreparedPayment createCancellation(PaymentTarget target, Payment payment, String requestId,
+                                                     String reason, boolean full, Map<Long, Integer> items) {
+        // 이력 테이블 도입 전에 접수된 전체 취소는 기존 멱등키와 취소 사유를 사용한다.
+        boolean legacyRetry = full && payment.getCancellations().isEmpty()
+                && payment.getStatus() == PaymentStatus.CANCEL_UNKNOWN;
+        if (!legacyRetry) {
+            if (payment.getStatus().isCancellationPending()) {
+                throw new CustomException(ErrorCode.PAYMENT_PENDING);
+            }
+            if (payment.getStatus() != PaymentStatus.COMPLETED
+                    && payment.getStatus() != PaymentStatus.PARTIALLY_CANCELLED) {
+                throw new CustomException(ErrorCode.PAYMENT_NOT_CANCELLABLE);
+            }
+            target.validatePaymentCancellation(LocalDateTime.now(clock));
+        }
+
+        long amount = full ? payment.getBalanceAmount() : calculatePartialCancellationAmount(target, items);
+        if (amount <= 0 || amount > payment.getBalanceAmount()) {
+            throw new CustomException(ErrorCode.PAYMENT_CANCEL_INVALID);
+        }
+
+        PaymentCancellation cancellation = new PaymentCancellation(payment, requestId,
+                legacyRetry ? payment.getCancelReason() : reason, amount, full, items, clock.instant());
+        payment.addCancellation(cancellation);
+        paymentRepository.saveAndFlush(payment);
+        return beginCancellation(payment, cancellation);
+    }
+
+    private long calculatePartialCancellationAmount(PaymentTarget target, Map<Long, Integer> items) {
+        if (target instanceof Reservation reservation) {
+            return reservationService.calculateCancellationAmount(reservation, items);
+        }
+        return storeService.calculateCancellationAmount((StoreOrder) target, items);
+    }
+
+    private PreparedPayment beginCancellation(Payment payment, PaymentCancellation cancellation) {
         payment.beginCancellation(cancellation.getCancelReason());
-        return new PreparedCancellation(PaymentSnapshot.from(payment), true);
+        return new PreparedPayment(PaymentSnapshot.from(payment), true);
     }
 
     private Map<Long, Integer> cancellationItems(PaymentTargetType type, PaymentPartialCancelReqDTO request) {
@@ -198,12 +231,12 @@ public class PaymentService {
         return items;
     }
 
-    private PaymentResDTO executeCancellation(PreparedCancellation prepared) {
+    private PaymentResDTO executeCancellation(PreparedPayment prepared) {
         PaymentSnapshot snapshot = prepared.snapshot();
         PaymentResDTO current = snapshot.payment();
         if (!prepared.submit()) return current;
         String key = "cancel-" + current.paymentOrderId()
-                + ("FULL".equals(snapshot.cancellationRequestId()) ? "" : "-" + snapshot.cancellationRequestId());
+                + (FULL_CANCELLATION.equals(snapshot.cancellationRequestId()) ? "" : "-" + snapshot.cancellationRequestId());
 
         PaymentResDTO result;
         try {
@@ -212,7 +245,7 @@ public class PaymentService {
                     : gateway.cancel(current.paymentKey(), current.cancelReason(), snapshot.cancelAmount(), key);
             result = applyResult(snapshot, response);
         } catch (PaymentGateway.Failure failure) {
-            result = failure.isRejected() ? reconcileRejectedCancellation(snapshot) : handleFailure(snapshot, false);
+            result = failure.isRejected() ? reconcileRejectedCancellation(snapshot) : markResultUnknown(snapshot);
         }
         if (result.status() != PaymentStatus.CANCELLED && result.status() != PaymentStatus.PARTIALLY_CANCELLED) {
             throw new CustomException(ErrorCode.PAYMENT_PENDING);
@@ -252,25 +285,18 @@ public class PaymentService {
         try {
             return applyResult(current, gateway.find(current.payment().paymentKey()));
         } catch (PaymentGateway.Failure failure) {
-            if (failure.isNotFound() && !current.payment().status().isCancellationPending()) {
-                PaymentResDTO result = update(current, (target, payment) -> {
-                    LocalDateTime expiresAt = target.getExpiresAt();
-                    if (expiresAt != null && !LocalDateTime.now(clock)
-                            .isBefore(expiresAt.plusMinutes(MISSING_PAYMENT_GRACE_MINUTES))) {
-                        payment.fail();
-                        target.failPayment();
-                    } else {
-                        payment.markUnknown();
-                    }
-                });
-                if (result.status().isTerminal()) return result;
-                throw new CustomException(ErrorCode.PAYMENT_GATEWAY_ERROR);
-            }
-            return handleFailure(current, false);
+            return handleFailure(current, target -> failure.isNotFound()
+                    && !current.payment().status().isCancellationPending() && approvalRecoveryExpired(target));
         }
     }
 
-    private Prepared prepare(Long memberId, PaymentTargetType type, Long targetId, PaymentReqDTO request) {
+    private boolean approvalRecoveryExpired(PaymentTarget target) {
+        LocalDateTime expiresAt = target.getExpiresAt();
+        return expiresAt != null && !LocalDateTime.now(clock)
+                .isBefore(expiresAt.plusMinutes(MISSING_PAYMENT_GRACE_MINUTES));
+    }
+
+    private PreparedPayment prepare(Long memberId, PaymentTargetType type, Long targetId, PaymentReqDTO request) {
         PaymentTarget target = findTarget(type, targetId, true);
         validateOwner(target, memberId);
         Payment existing = paymentRepository.findByTargetTypeAndTargetId(type, targetId).orElse(null);
@@ -286,14 +312,14 @@ public class PaymentService {
             if (existing.getStatus() != PaymentStatus.COMPLETED && existing.getStatus() != PaymentStatus.UNKNOWN) {
                 throw new CustomException(ErrorCode.PAYMENT_TARGET_NOT_PAYABLE);
             }
-            return new Prepared(PaymentSnapshot.from(existing), false);
+            return new PreparedPayment(PaymentSnapshot.from(existing), false);
         }
         if (paymentRepository.existsByPaymentKey(request.paymentKey())) {
             throw new CustomException(ErrorCode.PAYMENT_REQUEST_CONFLICT);
         }
         target.beginPayment(LocalDateTime.now(clock));
         Payment payment = paymentRepository.saveAndFlush(new Payment(type, target, request.paymentKey(), amount));
-        return new Prepared(PaymentSnapshot.from(payment), true);
+        return new PreparedPayment(PaymentSnapshot.from(payment), true);
     }
 
     private long amountOf(PaymentTarget target) {
@@ -304,46 +330,57 @@ public class PaymentService {
 
     private PaymentResDTO applyResult(PaymentSnapshot current, PaymentGateway.Result response) {
         if (!matches(current.payment(), response)) {
-            PaymentResDTO result = update(current, (target, payment) -> payment.markUnknown());
-            if (result.status().isTerminal()) return result;
-            throw new CustomException(ErrorCode.PAYMENT_GATEWAY_ERROR);
+            return markResultUnknown(current);
         }
         return update(current, (target, payment) -> {
             if (payment.getStatus().isCancellationPending()) {
-                PaymentCancellation cancellation = payment.getLatestCancellation();
-                long expectedBalance = cancellation == null ? 0 : cancellation.getBalanceBefore() - cancellation.getAmount();
-                if (("CANCELED".equals(response.status()) || "PARTIAL_CANCELED".equals(response.status()))
-                        && response.balanceAmount() == expectedBalance) {
-                    Map<Long, Integer> items = cancellation == null ? Map.of() : cancellation.getItems();
-                    if (target instanceof Reservation reservation) {
-                        reservationService.cancelPaidReservation(reservation, items, expectedBalance == 0);
-                    } else {
-                        storeService.cancelPaidOrder((StoreOrder) target, items, expectedBalance == 0);
-                    }
-                    payment.cancel(expectedBalance);
-                    if (cancellation != null) cancellation.complete(clock.instant());
-                } else if (current.payment().status() == PaymentStatus.CANCEL_REJECTED_VERIFY
-                        && response.balanceAmount() == payment.getBalanceAmount()
-                        && ("DONE".equals(response.status()) || "PARTIAL_CANCELED".equals(response.status()))) {
-                    cancellation.fail(clock.instant());
-                    payment.rejectCancellation();
-                } else {
-                    payment.markUnknown();
-                }
-                return;
-            }
-            switch (response.status()) {
-                case "DONE" -> {
-                    payment.complete(response.method(), response.approvedAt().toInstant(), response.balanceAmount());
-                    target.completePayment();
-                }
-                case "ABORTED", "EXPIRED" -> {
-                    payment.fail();
-                    target.failPayment();
-                }
-                default -> payment.markUnknown();
+                applyCancellationResult(target, payment, current.payment().status(), response);
+            } else {
+                applyApprovalResult(target, payment, response);
             }
         });
+    }
+
+    private void applyApprovalResult(PaymentTarget target, Payment payment, PaymentGateway.Result response) {
+        switch (response.status()) {
+            case "DONE" -> {
+                payment.complete(response.method(), response.approvedAt().toInstant(), response.balanceAmount());
+                target.completePayment();
+            }
+            case "ABORTED", "EXPIRED" -> failApproval(target, payment);
+            default -> payment.markUnknown();
+        }
+    }
+
+    private void applyCancellationResult(PaymentTarget target, Payment payment, PaymentStatus requestedStatus,
+                                         PaymentGateway.Result response) {
+        PaymentCancellation cancellation = payment.getLatestCancellation();
+        long expectedBalance = cancellation == null ? 0 : cancellation.getBalanceBefore() - cancellation.getAmount();
+        boolean partiallyCancelled = "PARTIAL_CANCELED".equals(response.status());
+        boolean cancelled = "CANCELED".equals(response.status()) || partiallyCancelled;
+        if (cancelled && response.balanceAmount() == expectedBalance) {
+            Map<Long, Integer> items = cancellation == null ? Map.of() : cancellation.getItems();
+            boolean fullyCancelled = expectedBalance == 0;
+            if (target instanceof Reservation reservation) {
+                reservationService.cancelPaidReservation(reservation, items, fullyCancelled);
+            } else {
+                storeService.cancelPaidOrder((StoreOrder) target, items, fullyCancelled);
+            }
+            payment.cancel(expectedBalance);
+            if (cancellation != null) {
+                cancellation.complete(clock.instant());
+            }
+            return;
+        }
+
+        if (requestedStatus == PaymentStatus.CANCEL_REJECTED_VERIFY
+                && response.balanceAmount() == payment.getBalanceAmount()
+                && ("DONE".equals(response.status()) || partiallyCancelled)) {
+            cancellation.fail(clock.instant());
+            payment.rejectCancellation();
+            return;
+        }
+        payment.markUnknown();
     }
 
     private boolean matches(PaymentResDTO payment, PaymentGateway.Result response) {
@@ -358,11 +395,14 @@ public class PaymentService {
                 && (!"DONE".equals(response.status()) || (response.approvedAt() != null && response.method() != null));
     }
 
-    private PaymentResDTO handleFailure(PaymentSnapshot current, boolean rejected) {
+    private PaymentResDTO markResultUnknown(PaymentSnapshot current) {
+        return handleFailure(current, ignored -> false);
+    }
+
+    private PaymentResDTO handleFailure(PaymentSnapshot current, Predicate<PaymentTarget> approvalFailed) {
         PaymentResDTO result = update(current, (target, payment) -> {
-            if (rejected) {
-                payment.fail();
-                target.failPayment();
+            if (approvalFailed.test(target)) {
+                failApproval(target, payment);
             } else {
                 payment.markUnknown();
             }
@@ -371,16 +411,23 @@ public class PaymentService {
         throw new CustomException(ErrorCode.PAYMENT_GATEWAY_ERROR);
     }
 
+    private void failApproval(PaymentTarget target, Payment payment) {
+        payment.fail();
+        target.failPayment();
+    }
+
     private PaymentResDTO update(PaymentSnapshot snapshot, BiConsumer<PaymentTarget, Payment> change) {
         return transaction.execute(status -> {
             PaymentResDTO current = snapshot.payment();
             PaymentTarget target = findTarget(current.targetType(), current.targetId(), true);
             Payment payment = requirePayment(current.targetType(), current.targetId());
             if (!payment.isTerminal()
-                    && payment.getStatus().isCancellationPending() == current.status().isCancellationPending()
-                    && Objects.equals(payment.getLatestCancellation() == null ? null : payment.getLatestCancellation().getId(),
-                                      snapshot.cancellationId())) {
-                change.accept(target, payment);
+                    && payment.getStatus().isCancellationPending() == current.status().isCancellationPending()) {
+                PaymentCancellation cancellation = payment.getLatestCancellation();
+                Long cancellationId = cancellation == null ? null : cancellation.getId();
+                if (Objects.equals(cancellationId, snapshot.cancellationId())) {
+                    change.accept(target, payment);
+                }
             }
             return PaymentResDTO.from(payment);
         });
@@ -415,9 +462,6 @@ public class PaymentService {
         }
     }
 
-    private record Prepared(PaymentSnapshot snapshot, boolean approve) {
-    }
-
-    private record PreparedCancellation(PaymentSnapshot snapshot, boolean submit) {
+    private record PreparedPayment(PaymentSnapshot snapshot, boolean submit) {
     }
 }

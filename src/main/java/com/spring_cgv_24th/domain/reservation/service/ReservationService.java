@@ -18,6 +18,7 @@ import com.spring_cgv_24th.global.exception.ErrorCode;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -105,15 +106,21 @@ public class ReservationService {
 
     @Transactional
     public void cancelPaidReservation(Reservation reservation, Map<Long, Integer> quantities, boolean fullyCancelled) {
-        List<ScreeningSeat> seats = screeningSeatRepository.findAllByReservationIdForUpdate(reservation.getId());
+        Map<Long, ScreeningSeat> occupiedSeats = new HashMap<>();
+        for (ScreeningSeat seat : screeningSeatRepository.findAllByReservationIdForUpdate(reservation.getId())) {
+            occupiedSeats.put(seat.getId(), seat);
+        }
         for (ReservationSeat item : reservationSeatRepository
                 .findAllByReservation_IdOrderByScreeningSeat_IdAsc(reservation.getId())) {
-            if (item.isCancelled() || (!quantities.isEmpty() && !quantities.containsKey(item.getScreeningSeat().getId()))) {
+            Long seatId = item.getScreeningSeat().getId();
+            if (item.isCancelled() || (!quantities.isEmpty() && !quantities.containsKey(seatId))) {
                 continue;
             }
             item.cancel();
-            seats.stream().filter(seat -> seat.getId().equals(item.getScreeningSeat().getId()))
-                    .forEach(ScreeningSeat::release);
+            ScreeningSeat occupiedSeat = occupiedSeats.get(seatId);
+            if (occupiedSeat != null) {
+                occupiedSeat.release();
+            }
         }
         if (fullyCancelled) reservation.cancelPayment(LocalDateTime.now(clock));
         else reservation.partiallyCancelPayment();

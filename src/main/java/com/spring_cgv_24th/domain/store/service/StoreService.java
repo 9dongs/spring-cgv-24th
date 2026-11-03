@@ -124,9 +124,12 @@ public class StoreService {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         for (Long orderId : orderIds) {
             try {
-                transaction.executeWithoutResult(status -> storeOrderRepository.findByIdForUpdate(orderId)
-                        .filter(order -> order.releaseStock(now))
-                        .ifPresent(this::restoreStock));
+                transaction.executeWithoutResult(status -> {
+                    StoreOrder order = storeOrderRepository.findByIdForUpdate(orderId).orElse(null);
+                    if (order != null && order.releaseStock(now)) {
+                        restoreStock(order);
+                    }
+                });
             } catch (RuntimeException error) {
                 log.warn("미결제 주문 재고 복원 실패: orderId={}", orderId, error);
             }
