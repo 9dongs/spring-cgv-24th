@@ -67,10 +67,6 @@ public class Payment {
         this.status = PaymentStatus.PROCESSING;
     }
 
-    public boolean isTerminal() {
-        return status.isTerminal();
-    }
-
     public void complete(String method, Instant approvedAt, long balanceAmount) {
         status = PaymentStatus.COMPLETED;
         this.method = method;

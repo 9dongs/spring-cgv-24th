@@ -257,7 +257,7 @@ public class PaymentService {
         PaymentResDTO pending = update(snapshot, (target, payment) -> payment.verifyCancellationRejection());
         PaymentResDTO result = refreshPayment(new PaymentSnapshot(pending, snapshot.cancellationId(),
                 snapshot.cancellationRequestId(), snapshot.cancelAmount()));
-        if (result.balanceAmount() == current.balanceAmount() && result.status().isTerminal()) {
+        if (result.balanceAmount() == current.balanceAmount() && !result.status().requiresReconciliation()) {
             throw new CustomException(ErrorCode.PAYMENT_CANCELLATION_REJECTED);
         }
         return result;
@@ -280,7 +280,7 @@ public class PaymentService {
     }
 
     private PaymentResDTO refreshPayment(PaymentSnapshot current) {
-        if (current.payment().status().isTerminal()) return current.payment();
+        if (!current.payment().status().requiresReconciliation()) return current.payment();
         try {
             return applyResult(current, gateway.find(current.payment().paymentKey()));
         } catch (PaymentGateway.Failure failure) {
@@ -328,7 +328,7 @@ public class PaymentService {
     }
 
     private PaymentResDTO applyResult(PaymentSnapshot current, PaymentGateway.Result response) {
-        if (!matches(current.payment(), response)) {
+        if (!isValidGatewayResponse(current.payment(), response)) {
             return markResultUnknown(current);
         }
         return update(current, (target, payment) -> {
@@ -382,16 +382,21 @@ public class PaymentService {
         payment.markUnknown();
     }
 
-    private boolean matches(PaymentResDTO payment, PaymentGateway.Result response) {
-        return response != null && payment.paymentKey().equals(response.paymentKey())
-                && payment.paymentOrderId().equals(response.orderId())
-                && payment.amount() == response.totalAmount() && "KRW".equals(response.currency())
-                && response.status() != null && response.balanceAmount() != null && response.balanceAmount() >= 0
-                && response.balanceAmount() <= payment.amount()
-                && (!"CANCELED".equals(response.status()) || response.balanceAmount() == 0)
-                // 여러 번 취소하면 토스가 잔액 0원에도 PARTIAL_CANCELED를 반환할 수 있다.
-                && (!"PARTIAL_CANCELED".equals(response.status()) || response.balanceAmount() < payment.amount())
-                && (!"DONE".equals(response.status()) || (response.approvedAt() != null && response.method() != null));
+    private boolean isValidGatewayResponse(PaymentResDTO payment, PaymentGateway.Result response) {
+        if (response == null || !payment.paymentKey().equals(response.paymentKey())
+                || !payment.paymentOrderId().equals(response.orderId())
+                || payment.amount() != response.totalAmount() || !"KRW".equals(response.currency())
+                || response.status() == null || response.balanceAmount() == null
+                || response.balanceAmount() < 0 || response.balanceAmount() > payment.amount()) {
+            return false;
+        }
+        return switch (response.status()) {
+            case "CANCELED" -> response.balanceAmount() == 0;
+            // 여러 번 취소하면 토스가 잔액 0원에도 PARTIAL_CANCELED를 반환할 수 있다.
+            case "PARTIAL_CANCELED" -> response.balanceAmount() < payment.amount();
+            case "DONE" -> response.approvedAt() != null && response.method() != null;
+            default -> true;
+        };
     }
 
     private PaymentResDTO markResultUnknown(PaymentSnapshot current) {
@@ -406,7 +411,7 @@ public class PaymentService {
                 payment.markUnknown();
             }
         });
-        if (result.status().isTerminal()) return result;
+        if (!result.status().requiresReconciliation()) return result;
         throw new CustomException(ErrorCode.PAYMENT_GATEWAY_ERROR);
     }
 
@@ -420,7 +425,7 @@ public class PaymentService {
             PaymentResDTO current = snapshot.payment();
             PaymentTarget target = findTarget(current.targetType(), current.targetId(), true);
             Payment payment = requirePayment(current.targetType(), current.targetId());
-            if (!payment.isTerminal()
+            if (payment.getStatus().requiresReconciliation()
                     && payment.getStatus().isCancellationPending() == current.status().isCancellationPending()) {
                 PaymentCancellation cancellation = payment.getLatestCancellation();
                 Long cancellationId = cancellation == null ? null : cancellation.getId();

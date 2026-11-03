@@ -32,6 +32,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -59,6 +60,8 @@ class ConcurrencyIntegrationTest {
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 30, 12, 0);
     private static final ZoneId ZONE = ZoneId.of("Asia/Seoul");
+    private static final int FIRST_SEAT_PRICE = 14_000;
+    private static final int PRODUCT_PRICE = 5_000;
     private static final PaymentCancelReqDTO CANCEL_REQUEST = new PaymentCancelReqDTO("단순 변심");
 
     @Autowired private JdbcTemplate jdbc;
@@ -83,8 +86,8 @@ class ConcurrencyIntegrationTest {
         LocalDateTime start = NOW.plusDays(1);
         screeningId = insert("insert into screening (movie_id, auditorium_id, starts_at, ends_at) values (?, ?, ?, ?)",
                 movieId, auditoriumId, start, start.plusMinutes(90));
-        seatId = insert("insert into screening_seat (screening_id, row_no, column_no, price) values (?, 1, 1, 14000)", screeningId);
-        productId = insert("insert into product (name, price) values ('팝콘', 5000)");
+        seatId = insertSeat(1, FIRST_SEAT_PRICE).id();
+        productId = insert("insert into product (name, price) values ('팝콘', ?)", PRODUCT_PRICE);
         insert("insert into theater_stock (theater_id, product_id, quantity, updated_at) values (?, ?, 6, CURRENT_TIMESTAMP)",
                 theaterId, productId);
     }
@@ -463,9 +466,10 @@ class ConcurrencyIntegrationTest {
     @ParameterizedTest
     @EnumSource(PaymentTargetType.class)
     void concurrentPartialCancellationUsesOriginalPriceAndRestoresResourcesOnce(PaymentTargetType type) throws Exception {
-        Target target = paidPartialTarget(type);
-        var first = partialRequest(target, 0);
-        long amount = partialAmount(target, 0);
+        var fixture = paidPartialTarget(type);
+        Target target = fixture.target();
+        var first = fixture.request(0);
+        long amount = fixture.price(0);
         when(gateway.cancel(anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(partiallyCancelled(target, target.amount() - amount));
         jdbc.update("update product set price = 99999 where product_id = ?", productId);
@@ -484,7 +488,7 @@ class ConcurrencyIntegrationTest {
                 () -> paymentService.cancelPartially(memberId, type, target.id(), changed));
         var invalid = type == PaymentTargetType.STORE_ORDER
                 ? new PaymentPartialCancelReqDTO(UUID.randomUUID(), "초과 수량", List.of(new PaymentPartialCancelReqDTO.Item(productId, 3)), null)
-                : partialRequest(target, 0);
+                : fixture.request(0);
         assertError(ErrorCode.PAYMENT_CANCEL_INVALID,
                 () -> paymentService.cancelPartially(memberId, type, target.id(), invalid));
     }
@@ -492,13 +496,14 @@ class ConcurrencyIntegrationTest {
     @ParameterizedTest
     @CsvSource({"STORE_ORDER, true", "STORE_ORDER, false", "RESERVATION, true", "RESERVATION, false"})
     void lastCancellationClosesPaymentAndRestoresRemainingResources(PaymentTargetType type, boolean finishWithFullCancel) {
-        Target target = paidPartialTarget(type);
+        var fixture = paidPartialTarget(type);
+        Target target = fixture.target();
         long remaining = target.amount();
         for (int index = 0; index < 2; index++) {
-            remaining -= partialAmount(target, index);
+            remaining -= fixture.price(index);
             when(gateway.cancel(anyString(), anyString(), anyLong(), anyString()))
                     .thenReturn(partiallyCancelled(target, remaining));
-            assertThat(paymentService.cancelPartially(memberId, type, target.id(), partialRequest(target, index))
+            assertThat(paymentService.cancelPartially(memberId, type, target.id(), fixture.request(index))
                     .balanceAmount()).isEqualTo(remaining);
         }
         if (type == PaymentTargetType.RESERVATION) {
@@ -515,7 +520,7 @@ class ConcurrencyIntegrationTest {
             result = paymentService.getPayment(memberId, type, target.id());
         } else {
             when(gateway.cancel(anyString(), anyString(), anyLong(), anyString())).thenReturn(partiallyCancelled(target, 0));
-            result = paymentService.cancelPartially(memberId, type, target.id(), partialRequest(target, 2));
+            result = paymentService.cancelPartially(memberId, type, target.id(), fixture.request(2));
         }
         assertThat(result.status()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(result.balanceAmount()).isZero();
@@ -528,9 +533,10 @@ class ConcurrencyIntegrationTest {
     @ParameterizedTest
     @EnumSource(PaymentTargetType.class)
     void uncertainPartialCancellationBlocksOtherRequestsAndRetriesWithTheSameKey(PaymentTargetType type) {
-        Target target = paidPartialTarget(type);
-        var request = partialRequest(target, 0);
-        long amount = partialAmount(target, 0);
+        var fixture = paidPartialTarget(type);
+        Target target = fixture.target();
+        var request = fixture.request(0);
+        long amount = fixture.price(0);
         when(gateway.cancel(anyString(), anyString(), anyLong(), anyString()))
                 .thenThrow(new PaymentGateway.Failure(false)).thenReturn(partiallyCancelled(target, target.amount() - amount));
         assertThrows(CustomException.class, () -> paymentService.cancelPartially(memberId, type, target.id(), request));
@@ -538,7 +544,7 @@ class ConcurrencyIntegrationTest {
         assertThat(paymentService.getPayment(memberId, type, target.id()).status()).isEqualTo(PaymentStatus.CANCEL_UNKNOWN);
         assertPartialResources(target, 0);
         assertError(ErrorCode.PAYMENT_PENDING,
-                () -> paymentService.cancelPartially(memberId, type, target.id(), partialRequest(target, 1)));
+                () -> paymentService.cancelPartially(memberId, type, target.id(), fixture.request(1)));
         assertError(ErrorCode.PAYMENT_PENDING,
                 () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST));
 
@@ -552,12 +558,13 @@ class ConcurrencyIntegrationTest {
     @ParameterizedTest
     @EnumSource(PaymentTargetType.class)
     void rejectedPartialCancellationIsRecoveredAndAllowsAnotherRequest(PaymentTargetType type) {
-        Target target = paidPartialTarget(type);
-        var first = partialRequest(target, 0);
-        var next = partialRequest(target, 1);
+        var fixture = paidPartialTarget(type);
+        Target target = fixture.target();
+        var first = fixture.request(0);
+        var next = fixture.request(1);
         when(gateway.cancel(anyString(), anyString(), anyLong(), anyString()))
                 .thenThrow(new PaymentGateway.Failure(true))
-                .thenReturn(partiallyCancelled(target, target.amount() - partialAmount(target, 1)));
+                .thenReturn(partiallyCancelled(target, target.amount() - fixture.price(1)));
         when(gateway.find("payment-key")).thenThrow(new PaymentGateway.Failure(false))
                 .thenReturn(approved(target, target.amount()));
 
@@ -573,9 +580,10 @@ class ConcurrencyIntegrationTest {
 
     @Test
     void lateLookupFromPreviousCancellationCannotChangeTheNextRequest() throws Exception {
-        Target target = paidPartialTarget(PaymentTargetType.STORE_ORDER);
-        var first = partialRequest(target, 0);
-        var firstResult = partiallyCancelled(target, 10_000);
+        var fixture = paidPartialTarget(PaymentTargetType.STORE_ORDER);
+        Target target = fixture.target();
+        var first = fixture.request(0);
+        var firstResult = partiallyCancelled(target, target.amount() - fixture.price(0));
         when(gateway.cancel(anyString(), anyString(), anyLong(), anyString()))
                 .thenThrow(new PaymentGateway.Failure(false)).thenReturn(firstResult);
         assertThrows(CustomException.class, () -> paymentService.cancelPartially(memberId, target.type(), target.id(), first));
@@ -596,37 +604,45 @@ class ConcurrencyIntegrationTest {
                 throw new PaymentGateway.Failure(false);
             });
             assertThrows(CustomException.class,
-                    () -> paymentService.cancelPartially(memberId, target.type(), target.id(), partialRequest(target, 1)));
+                    () -> paymentService.cancelPartially(memberId, target.type(), target.id(), fixture.request(1)));
         } finally {
             release.countDown();
         }
-        when(gateway.find("payment-key")).thenReturn(partiallyCancelled(target, 5_000));
+        when(gateway.find("payment-key")).thenReturn(partiallyCancelled(target, target.amount() - fixture.price(0) - fixture.price(1)));
         paymentService.recoverUnresolvedPayments();
         assertPartialResources(target, 2);
     }
 
-    private Target paidPartialTarget(PaymentTargetType type) {
+    private PartialTarget paidPartialTarget(PaymentTargetType type) {
         if (type == PaymentTargetType.STORE_ORDER) {
-            return approve(orderTarget(3));
+            return new PartialTarget(approve(orderTarget(3)), Collections.nCopies(3, new PricedItem(productId, PRODUCT_PRICE)));
         }
-        long second = insert("insert into screening_seat (screening_id, row_no, column_no, price) values (?, 1, 2, 10000)", screeningId);
-        long third = insert("insert into screening_seat (screening_id, row_no, column_no, price) values (?, 1, 3, 8000)", screeningId);
-        return approve(reservationTarget(List.of(seatId, second, third)));
+        var seats = List.of(new PricedItem(seatId, FIRST_SEAT_PRICE), insertSeat(2, 10_000), insertSeat(3, 8_000));
+        var target = approve(reservationTarget(seats.stream().map(PricedItem::id).toList()));
+        return new PartialTarget(target, seats);
     }
 
-    private PaymentPartialCancelReqDTO partialRequest(Target target, int index) {
-        List<Long> seats = target.type() == PaymentTargetType.RESERVATION
-                ? jdbc.queryForList("select screening_seat_id from reservation_seat where reservation_id = ? order by screening_seat_id", Long.class, target.id())
-                : List.of();
-        return new PaymentPartialCancelReqDTO(UUID.randomUUID(), "일부 취소",
-                seats.isEmpty() ? List.of(new PaymentPartialCancelReqDTO.Item(productId, 1)) : List.of(),
-                seats.isEmpty() ? List.of() : List.of(seats.get(index)));
+    private PricedItem insertSeat(int column, int price) {
+        long id = insert("insert into screening_seat (screening_id, row_no, column_no, price) values (?, 1, ?, ?)",
+                screeningId, column, price);
+        return new PricedItem(id, price);
     }
 
-    private long partialAmount(Target target, int index) {
-        if (target.type() == PaymentTargetType.STORE_ORDER) return target.amount() / 3;
-        return jdbc.queryForList("select price from reservation_seat where reservation_id = ? order by screening_seat_id",
-                Long.class, target.id()).get(index);
+    private record PricedItem(long id, long price) {
+    }
+
+    private record PartialTarget(Target target, List<PricedItem> items) {
+        PaymentPartialCancelReqDTO request(int index) {
+            long id = items.get(index).id();
+            boolean storeOrder = target.type() == PaymentTargetType.STORE_ORDER;
+            return new PaymentPartialCancelReqDTO(UUID.randomUUID(), "일부 취소",
+                    storeOrder ? List.of(new PaymentPartialCancelReqDTO.Item(id, 1)) : List.of(),
+                    storeOrder ? List.of() : List.of(id));
+        }
+
+        long price(int index) {
+            return items.get(index).price();
+        }
     }
 
     private String partialKey(Target target, PaymentPartialCancelReqDTO request) {

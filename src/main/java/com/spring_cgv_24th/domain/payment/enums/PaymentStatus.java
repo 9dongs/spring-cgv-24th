@@ -11,8 +11,8 @@ public enum PaymentStatus {
     CANCEL_REJECTED_VERIFY,
     CANCELLED;
 
-    public boolean isTerminal() {
-        return this == COMPLETED || this == PARTIALLY_CANCELLED || this == FAILED || this == CANCELLED;
+    public boolean requiresReconciliation() {
+        return this == PROCESSING || this == UNKNOWN || isCancellationPending();
     }
 
     public boolean isCancellationPending() {
