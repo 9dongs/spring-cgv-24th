@@ -131,6 +131,29 @@ class ConcurrencyIntegrationTest {
     }
 
     @Test
+    void oneFailedStockRestoreDoesNotRollBackAnotherOrder() {
+        var request = new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 2)));
+        long first = storeService.createOrder(theaterId, memberId, request).orderId();
+        long second = storeService.createOrder(theaterId, memberId, request).orderId();
+        long missingStockProduct = insert("insert into product (name, price) values ('재고 없음', 5000)");
+        try {
+            insert("insert into store_order_item (order_id, product_id, quantity, unit_price) values (?, ?, 1, 5000)",
+                    first, missingStockProduct);
+            when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
+
+            storeService.releaseUnpaidOrderStock();
+
+            String orderStatus = "select status from store_order where store_order_id = ?";
+            assertThat(jdbc.queryForObject(orderStatus, String.class, first)).isEqualTo("PENDING_PAYMENT");
+            assertThat(jdbc.queryForObject(orderStatus, String.class, second)).isEqualTo("EXPIRED");
+            assertThat(count("select quantity from theater_stock where theater_id = ?", theaterId)).isEqualTo(4);
+        } finally {
+            jdbc.update("delete from store_order_item where product_id = ?", missingStockProduct);
+            jdbc.update("delete from product where product_id = ?", missingStockProduct);
+        }
+    }
+
+    @Test
     void completedOrdersDoNotExpireOrRestoreStock() {
         var request = new StoreOrderReqDTO.CreateOrderDTO(List.of(new StoreOrderReqDTO.OrderItemDTO(productId, 2)));
         long orderId = storeService.createOrder(theaterId, memberId, request).orderId();
@@ -278,7 +301,7 @@ class ConcurrencyIntegrationTest {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             if (responseStatus.equals("ERROR")) throw new PaymentGateway.Failure(false);
             if (responseStatus.equals("DONE")) return approved(target, target.amount());
-            return new PaymentGateway.Result("payment-key", target.orderId(), responseStatus, "KRW", target.amount(), 0, null, null);
+            return new PaymentGateway.Result("payment-key", target.orderId(), responseStatus, "KRW", target.amount(), 0L, null, null);
         });
         when(clock.instant()).thenReturn(NOW.plusMinutes(10).atZone(ZONE).toInstant());
         paymentService.recoverUnresolvedPayments();
@@ -371,13 +394,14 @@ class ConcurrencyIntegrationTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"STORE_ORDER, false", "RESERVATION, true"})
-    void uncertainCancellationKeepsResourcesUntilAutomaticLookupConfirmsIt(PaymentTargetType type, boolean invalidResponse) {
+    @CsvSource({"STORE_ORDER, TIMEOUT", "RESERVATION, WRONG_BALANCE", "STORE_ORDER, MISSING_BALANCE"})
+    void uncertainCancellationKeepsResourcesUntilAutomaticLookupConfirmsIt(PaymentTargetType type, String failure) {
         Target target = paidTarget(type);
         when(gateway.cancel(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
-            if (invalidResponse) return new PaymentGateway.Result("payment-key", target.orderId(), "CANCELED", "KRW",
-                    target.amount(), 1, "카드", NOW.atZone(ZONE).toOffsetDateTime());
-            throw new PaymentGateway.Failure(false);
+            if ("TIMEOUT".equals(failure)) throw new PaymentGateway.Failure(false);
+            Long balance = "MISSING_BALANCE".equals(failure) ? null : 1L;
+            return new PaymentGateway.Result("payment-key", target.orderId(), "CANCELED", "KRW",
+                    target.amount(), balance, "카드", NOW.atZone(ZONE).toOffsetDateTime());
         });
         assertThat(assertThrows(CustomException.class,
                 () -> paymentService.cancel(memberId, type, target.id(), CANCEL_REQUEST)).getErrorCode())
@@ -644,7 +668,7 @@ class ConcurrencyIntegrationTest {
     }
 
     private PaymentGateway.Result cancelled(Target target) {
-        return new PaymentGateway.Result("payment-key", target.orderId(), "CANCELED", "KRW", target.amount(), 0,
+        return new PaymentGateway.Result("payment-key", target.orderId(), "CANCELED", "KRW", target.amount(), 0L,
                 "카드", NOW.atZone(ZONE).toOffsetDateTime());
     }
 

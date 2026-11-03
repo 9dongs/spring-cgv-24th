@@ -28,11 +28,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -45,6 +50,7 @@ public class StoreService {
     private final StoreOrderRepository storeOrderRepository;
     private final StoreOrderItemRepository storeOrderItemRepository;
     private final Clock clock;
+    private final PlatformTransactionManager transactionManager;
 
     public List<ProductResDTO> getProducts() {
         return productRepository.findAll(Sort.by("id")).stream()
@@ -110,16 +116,20 @@ public class StoreService {
         return StoreOrderResDTO.from(order, storeOrderItemRepository.saveAll(items));
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void releaseUnpaidOrderStock() {
         LocalDateTime now = LocalDateTime.now(clock);
-        List<StoreOrder> orders = storeOrderRepository
-                .findOrdersForStockReleaseForUpdate(StoreOrderStatus.PENDING_PAYMENT, StoreOrderStatus.PAYMENT_FAILED, now);
-        for (StoreOrder order : orders) {
-            if (!order.releaseStock(now)) {
-                continue;
+        List<Long> orderIds = storeOrderRepository
+                .findOrderIdsForStockRelease(StoreOrderStatus.PENDING_PAYMENT, StoreOrderStatus.PAYMENT_FAILED, now);
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        for (Long orderId : orderIds) {
+            try {
+                transaction.executeWithoutResult(status -> storeOrderRepository.findByIdForUpdate(orderId)
+                        .filter(order -> order.releaseStock(now))
+                        .ifPresent(this::restoreStock));
+            } catch (RuntimeException error) {
+                log.warn("미결제 주문 재고 복원 실패: orderId={}", orderId, error);
             }
-            restoreStock(order);
         }
     }
 

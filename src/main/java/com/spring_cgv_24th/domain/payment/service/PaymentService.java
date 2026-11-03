@@ -350,7 +350,7 @@ public class PaymentService {
         return response != null && payment.paymentKey().equals(response.paymentKey())
                 && payment.paymentOrderId().equals(response.orderId())
                 && payment.amount() == response.totalAmount() && "KRW".equals(response.currency())
-                && response.status() != null && response.balanceAmount() >= 0
+                && response.status() != null && response.balanceAmount() != null && response.balanceAmount() >= 0
                 && response.balanceAmount() <= payment.amount()
                 && (!"CANCELED".equals(response.status()) || response.balanceAmount() == 0)
                 // 여러 번 취소하면 토스가 잔액 0원에도 PARTIAL_CANCELED를 반환할 수 있다.

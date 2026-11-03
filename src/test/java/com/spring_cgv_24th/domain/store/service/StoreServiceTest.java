@@ -39,6 +39,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
 
 @ExtendWith(MockitoExtension.class)
 class StoreServiceTest {
@@ -51,13 +52,14 @@ class StoreServiceTest {
     @Mock private MemberRepository memberRepository;
     @Mock private StoreOrderRepository storeOrderRepository;
     @Mock private StoreOrderItemRepository storeOrderItemRepository;
+    @Mock private PlatformTransactionManager transactionManager;
     private StoreService storeService;
 
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
         storeService = new StoreService(productRepository, theaterStockRepository, theaterRepository,
-                memberRepository, storeOrderRepository, storeOrderItemRepository, clock);
+                memberRepository, storeOrderRepository, storeOrderItemRepository, clock, transactionManager);
     }
 
     @Test

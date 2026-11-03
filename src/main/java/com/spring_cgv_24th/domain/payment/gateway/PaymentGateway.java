@@ -15,7 +15,7 @@ public interface PaymentGateway {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Result(String paymentKey, String orderId, String status, String currency,
-                  long totalAmount, long balanceAmount, String method, OffsetDateTime approvedAt) {
+                  long totalAmount, Long balanceAmount, String method, OffsetDateTime approvedAt) {
     }
 
     class Failure extends RuntimeException {
