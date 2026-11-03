@@ -15,7 +15,7 @@ CEOS 24기 백엔드 스터디, CGV 클론 코딩 프로젝트
 
 ## CGV DB 설계서
 
-현재 엔티티 코드 기준으로 작성했다. 테이블은 **15개**이며, 별도의 `seat` 테이블은 사용하지 않는다. 모든 테이블의 PK는 단일 `BIGINT AUTO_INCREMENT`이고, 실제 PK 컬럼명은 테이블마다 다르다.
+현재 엔티티 매핑 기준으로 테이블은 **18개**다. 회차별 좌석은 `screening_seat`에 저장한다. `payment_cancellation_item`은 복합 PK를 사용하며, 나머지 테이블은 단일 `BIGINT AUTO_INCREMENT` PK를 사용한다.
 
 ### 테이블 목록
 
@@ -36,6 +36,9 @@ CEOS 24기 백엔드 스터디, CGV 클론 코딩 프로젝트
 | `theater_stock` | 영화관별 상품 재고 |
 | `store_order` | 매점 구매 |
 | `store_order_item` | 구매 상품 상세 |
+| `payment` | 예매/매점 구매의 결제 상태와 금액 |
+| `payment_cancellation` | 결제 취소 요청별 이력 |
+| `payment_cancellation_item` | 취소 요청별 상품/좌석과 수량 |
 
 ### 테이블 상세
 
@@ -51,6 +54,7 @@ CEOS 24기 백엔드 스터디, CGV 클론 코딩 프로젝트
 | `password_hash` | VARCHAR(255) | NOT NULL, DEFAULT `!DISABLED!` | BCrypt 비밀번호 해시 |
 | `role` | VARCHAR(20) | NOT NULL, DEFAULT `USER` | `USER`, `ADMIN` |
 | `created_at` | TIMESTAMP(6) | NOT NULL, DEFAULT CURRENT_TIMESTAMP(6) | 가입 시각 |
+| `refresh_token_hash` | VARCHAR(64) | NULLABLE, UNIQUE | 현재 Refresh Token의 SHA-256 해시 |
 
 #### 2. `theater`
 
@@ -145,10 +149,12 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | `reservation_id` | BIGINT | PK, AUTO_INCREMENT | 예매 ID |
 | `member_id` | BIGINT | FK → `member.member_id`, NOT NULL | 예매 회원 |
 | `screening_id` | BIGINT | FK → `screening.screening_id`, NOT NULL | 예매한 상영 회차 |
-| `status` | VARCHAR(20) | NOT NULL, DEFAULT `CONFIRMED` | `CONFIRMED`, `CANCELLED` |
+| `status` | VARCHAR(20) | NOT NULL, DEFAULT `CONFIRMED` | 새 예매는 `PENDING_PAYMENT`로 생성하고 승인 성공 시 `CONFIRMED`로 변경 |
 | `reserved_at` | TIMESTAMP(6) | NOT NULL, DEFAULT CURRENT_TIMESTAMP(6) | 예매 시각 |
 | `cancelled_at` | TIMESTAMP(6) | NULLABLE | 취소 시각 |
 | `total_price` | BIGINT | NOT NULL | 예매 당시 좌석 가격 합계 |
+| `payment_order_id` | VARCHAR(64) | NULLABLE, UNIQUE | 토스에 주문번호로 전달하는 UUID |
+| `expires_at` | TIMESTAMP(6) | NULLABLE | 새 예매의 결제 대기 만료 시각 |
 
 한 예매가 여러 `screening_seat`을 점유할 수 있다. 취소 시 `status`와 `cancelled_at`을 변경하고 현재 점유 좌석의 `reservation_id`를 비우지만, `reservation_seat`의 이력은 유지한다.
 
@@ -162,10 +168,11 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | `reservation_id` | BIGINT | FK → `reservation.reservation_id`, NOT NULL | 소속 예매 |
 | `screening_seat_id` | BIGINT | FK → `screening_seat.screening_seat_id`, NOT NULL | 예매한 회차 좌석 |
 | `price` | INT | NOT NULL | 예매 당시 좌석 가격 |
+| `cancelled` | BOOLEAN | NOT NULL, DEFAULT FALSE | 결제 취소로 해당 좌석이 취소됐는지 표시 |
 
 **UNIQUE:** (`reservation_id`, `screening_seat_id`)
 
-`screening_seat.reservation_id`는 현재 점유 상태이고, `reservation_seat`은 변경하지 않는 예매 이력이다.
+`screening_seat.reservation_id`는 현재 점유 상태를 나타낸다. `reservation_seat`에는 예매 당시 좌석과 가격을 보존하고 좌석별 취소 여부를 기록한다.
 
 #### 10. `theater_favorite`
 
@@ -234,6 +241,9 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | `member_id` | BIGINT | FK → `member.member_id`, NOT NULL | 구매 회원 |
 | `theater_id` | BIGINT | FK → `theater.theater_id`, NOT NULL | 구매 영화관 |
 | `purchased_at` | TIMESTAMP(6) | NOT NULL | 구매 시각 |
+| `status` | VARCHAR(30) | NOT NULL, DEFAULT `COMPLETED` | 새 주문은 `PENDING_PAYMENT`로 생성하고 승인 성공 시 `COMPLETED`로 변경 |
+| `payment_order_id` | VARCHAR(64) | NULLABLE, UNIQUE | 토스에 주문번호로 전달하는 UUID |
+| `expires_at` | TIMESTAMP(6) | NULLABLE | 새 주문의 결제 대기 만료 시각 |
 
 #### 15. `store_order_item`
 
@@ -246,10 +256,53 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | `product_id` | BIGINT | FK → `product.product_id`, NOT NULL | 구매 상품 |
 | `quantity` | INT | NOT NULL | 구매 수량 |
 | `unit_price` | INT | NOT NULL | 구매 당시 상품 단가 |
+| `cancelled_quantity` | INT | NOT NULL, DEFAULT 0 | 상품별 누적 취소 수량 |
 
 **UNIQUE:** (`order_id`, `product_id`)
 
 구매 합계는 각 상세의 `quantity × unit_price`를 합산한다.
+
+#### 16. `payment`
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `payment_id` | BIGINT | PK, AUTO_INCREMENT | 내부 결제 ID |
+| `target_type` | ENUM | NOT NULL | `RESERVATION` 또는 `STORE_ORDER` |
+| `target_id` | BIGINT | NOT NULL | 예매 또는 매점 주문의 PK |
+| `payment_order_id` | VARCHAR(64) | NOT NULL | 결제 대상에서 가져온 토스 주문번호 |
+| `payment_key` | VARCHAR(200) | NOT NULL, UNIQUE | 토스 결제 키 |
+| `amount` | BIGINT | NOT NULL | 최초 결제 요청 금액 |
+| `balance_amount` | BIGINT | NOT NULL | 취소 후 남은 결제 금액 |
+| `status` | VARCHAR(30) | NOT NULL | 결제 처리 상태 |
+| `method` | VARCHAR(255) | NULLABLE | 결제 수단 |
+| `approved_at` | DATETIME(6) | NULLABLE | 승인 시각 |
+| `cancel_reason` | VARCHAR(200) | NULLABLE | 결제에 기록된 취소 사유 |
+
+**UNIQUE** (`target_type`, `target_id`)
+
+#### 17. `payment_cancellation`
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `payment_cancellation_id` | BIGINT | PK, AUTO_INCREMENT | 취소 이력 ID |
+| `payment_id` | BIGINT | FK → `payment.payment_id`, NOT NULL | 취소 대상 결제 |
+| `request_id` | VARCHAR(36) | NOT NULL | 결제별 취소 요청 식별자 |
+| `cancel_reason` | VARCHAR(200) | NOT NULL | 취소 사유 |
+| `amount` | BIGINT | NOT NULL | 이번 요청에서 취소할 금액 |
+| `balance_before` | BIGINT | NOT NULL | 요청 직전 남은 결제 금액 |
+| `full_cancellation` | BIT(1) | NOT NULL | 남은 금액 전체 취소 요청 여부 |
+| `requested_at` | DATETIME(6) | NOT NULL | 취소 요청 시각 |
+| `completed_at` | DATETIME(6) | NULLABLE | 취소 완료 시각 |
+
+**UNIQUE** (`payment_id`, `request_id`)
+
+#### 18. `payment_cancellation_item`
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `payment_cancellation_id` | BIGINT | 복합 PK, FK → `payment_cancellation.payment_cancellation_id` | 소속 취소 요청 |
+| `item_id` | BIGINT | 복합 PK | 매점 상품 ID 또는 상영 좌석 ID |
+| `quantity` | INT | NOT NULL | 상품 취소 수량. 좌석은 1 |
 
 ### 관계 및 구현 규칙
 
@@ -271,6 +324,9 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | `member`, `theater` → `store_order` | 회원의 지점별 매점 구매 |
 | `store_order` 1:N `store_order_item` | 구매별 상품 상세 |
 | `product` 1:N `store_order_item` | 상품별 구매 상세 |
+| `reservation` 또는 `store_order` 1:0..1 `payment` | `target_type`과 `target_id`로 연결하는 논리 관계 |
+| `payment` 1:0..N `payment_cancellation` | 한 결제에 여러 취소 요청을 기록 |
+| `payment_cancellation` 1:0..N `payment_cancellation_item` | 요청별 상품/좌석을 기록 |
 
 </details>
 
@@ -355,7 +411,11 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | 매점 | 공통 매점 메뉴 조회 | `GET` | `/api/store/products` | 불필요 |
 | 매점 | 영화관별 상품/재고 조회 | `GET` | `/api/theaters/{theaterId}/store/products` | 불필요 |
 | 매점 | 영화관별 재고 등록/보충 | `PATCH` | `/api/theaters/{theaterId}/store/products/{productId}/stock` | ADMIN |
-| 매점 | 매점 상품 구매 | `POST` | `/api/theaters/{theaterId}/store/orders` | 로그인 |
+| 매점 | 매점 주문 생성 | `POST` | `/api/theaters/{theaterId}/store/orders` | 로그인 |
+| 결제 | 결제 승인 | `POST` | `/api/payments/{targetType}/{targetId}/confirm` | 로그인 |
+| 결제 | 결제 조회 | `GET` | `/api/payments/{targetType}/{targetId}` | 로그인 |
+| 결제 | 전체 취소 | `POST` | `/api/payments/{targetType}/{targetId}/cancel` | 로그인 |
+| 결제 | 부분 취소 | `POST` | `/api/payments/{targetType}/{targetId}/cancel/partial` | 로그인 |
 
 ### 상세 명세
 
@@ -966,10 +1026,12 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 {
   "reservationId": 1,
   "screeningId": 1,
-  "status": "CONFIRMED",
+  "status": "PENDING_PAYMENT",
   "reservedAt": "2026-09-28T16:30:00",
   "screeningSeatIds": [1, 2],
-  "totalPrice": 28000
+  "totalPrice": 28000,
+  "expiresAt": "2026-09-28T16:40:00",
+  "paymentOrderId": "32e8f20d-a429-4775-b904-0fb91f8994d5"
 }
 ```
 
@@ -996,7 +1058,7 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | --- | --- | --- | --- |
 | `reservationId` | Long | O | 예매 ID, 양수 |
 
-취소하면 예매 상태와 취소 시각을 변경하고 현재 좌석 점유를 해제한다. 예매 당시 좌석, 가격 이력은 유지한다.
+결제 대기 중인 예매를 취소하면 현재 좌석 점유를 해제하고 좌석과 가격 이력을 보존한다. 승인된 결제가 있는 예매는 결제 취소 API를 사용한다.
 
 **오류 코드**
 
@@ -1006,6 +1068,7 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | `404` | `RESERVATION404` | 존재하지 않는 예매 |
 | `409` | `RESERVATION409` | 이미 취소된 예매 |
 | `409` | `RESERVATION_CLOSED409` | 상영이 시작되어 취소할 수 없음 |
+| `409` | `RESERVATION_PAYMENT409` | 결제 진행 중이거나 결제 취소 API로 처리해야 하는 예매 |
 
 </details>
 
@@ -1154,7 +1217,10 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
       "unitPrice": 7000
     }
   ],
-  "totalPrice": 14000
+  "totalPrice": 14000,
+  "status": "PENDING_PAYMENT",
+  "expiresAt": "2026-09-28T16:50:00",
+  "paymentOrderId": "6765bbad-08cb-4e41-9603-0c1046120321"
 }
 ```
 
@@ -1168,6 +1234,97 @@ CGV 지점 한 곳을 저장한다. 상영관과 재고가 이 지점에 속한�
 | `404` | `PRODUCT404` | 존재하지 않는 매점 상품 |
 | `404` | `THEATER_STOCK404` | 해당 영화관에 상품 재고가 없음 |
 | `409` | `STORE_STOCK409` | 구매 가능한 재고가 부족함 |
+
+</details>
+
+#### 결제
+
+모든 결제 API는 로그인한 회원 본인의 예매나 매점 주문에 대해 호출한다. 성공하면 `200 OK`와 공통 응답의 `data`로 결제 정보를 반환한다.
+
+| 경로 변수 | 값 |
+| --- | --- |
+| `targetType` | `RESERVATION` 또는 `STORE_ORDER` |
+| `targetId` | 예매 응답의 `reservationId` 또는 매점 주문 응답의 `orderId`에 해당하는 양의 정수 |
+
+<details>
+<summary>결제 승인 / 조회 / 전체 취소 / 부분 취소 상세</summary>
+
+**승인 `POST /api/payments/{targetType}/{targetId}/confirm`**
+
+토스 인증 성공 URL의 `orderId`를 본문의 `paymentOrderId`로 전달한다. `amount`는 생성 응답의 `totalPrice`와 일치해야 한다.
+
+```json
+{
+  "paymentKey": "sandbox-payment-key",
+  "paymentOrderId": "6765bbad-08cb-4e41-9603-0c1046120321",
+  "amount": 14000
+}
+```
+
+**조회 `GET /api/payments/{targetType}/{targetId}`**
+
+요청 본문 없이 호출한다. 저장된 결제를 반환하며, 승인 또는 취소 결과가 미확정이면 토스 API로 결과를 확인한다.
+
+**전체 취소 `POST /api/payments/{targetType}/{targetId}/cancel`**
+
+남은 결제 금액을 모두 취소한다. `cancelReason`은 공백을 제외한 내용이 있어야 하며 최대 200자다.
+
+```json
+{ "cancelReason": "주문 취소" }
+```
+
+**부분 취소 `POST /api/payments/{targetType}/{targetId}/cancel/partial`**
+
+매점은 `items`에 상품 ID와 수량을, 예매는 `screeningSeatIds`에 상영 좌석 ID를 전달한다. 서버가 취소 금액을 계산한다. `cancelReason`은 전체 취소와 같은 규칙을 따르고, 동일 요청을 재시도할 때는 같은 UUID `requestId`와 요청 내용을 사용한다.
+
+매점 주문
+
+```json
+{
+  "requestId": "d057624a-2a93-4929-a215-da7bb0b9b778",
+  "cancelReason": "상품 일부 취소",
+  "items": [{ "productId": 1, "quantity": 1 }]
+}
+```
+
+영화 예매
+
+```json
+{
+  "requestId": "b49bca55-4a68-4c8f-a316-5d3c45f75f36",
+  "cancelReason": "예매 좌석 일부 취소",
+  "screeningSeatIds": [1]
+}
+```
+
+**공통 응답 `data` 예시**
+
+```json
+{
+  "targetType": "STORE_ORDER",
+  "targetId": 1,
+  "paymentOrderId": "6765bbad-08cb-4e41-9603-0c1046120321",
+  "paymentKey": "sandbox-payment-key",
+  "status": "PARTIALLY_CANCELLED",
+  "amount": 14000,
+  "balanceAmount": 7000,
+  "method": "카드",
+  "approvedAt": "2026-09-28T07:41:00Z",
+  "cancelReason": "상품 일부 취소"
+}
+```
+
+| HTTP 상태 | 코드 | 상황 |
+| --- | --- | --- |
+| `400` | `PAYMENT_AMOUNT400` | 승인 요청 금액이 서버에 저장된 금액과 다름 |
+| `400` | `PAYMENT_FAILED400` | 토스에서 결제 승인을 거절함 |
+| `400` | `PAYMENT_CANCEL400` | 취소 대상 또는 수량이 올바르지 않음 |
+| `403` | `PAYMENT403` | 본인의 결제 대상이 아님 |
+| `404` | `PAYMENT_TARGET404` / `PAYMENT404` | 결제 대상 또는 결제 기록을 찾을 수 없음 |
+| `409` | `PAYMENT_TARGET409` / `PAYMENT_CANCEL409` | 현재 상태나 기한상 승인 또는 취소를 진행할 수 없음 |
+| `409` | `PAYMENT_REQUEST409` / `PAYMENT_CANCEL_REQUEST409` | 승인 정보가 일치하지 않거나 같은 취소 요청 ID에 다른 내용이 전달됨 |
+| `409` | `PAYMENT_PENDING409` | 승인 또는 취소 결과를 결제 조회로 확인해야 함 |
+| `502` | `PAYMENT_GATEWAY502` | 토스 응답을 확인할 수 없어 결제 조회가 필요함 |
 
 </details>
 
