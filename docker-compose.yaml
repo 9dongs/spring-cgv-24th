@@ -44,6 +44,9 @@ services:
       - "127.0.0.1:3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/prometheus.yaml:/etc/grafana/provisioning/datasources/cgv-prometheus.yaml:ro
+      - ./monitoring/grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/cgv.yaml:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/cgv-dashboards:ro
 
   prometheus:
     image: prom/prometheus:v3.16.0
