@@ -2515,3 +2515,54 @@ EC2에서 Docker Hub 이미지 내려받기
 영화 목록 API는 RDS를 조회하므로, 이 요청 한 번으로 Nginx가 앱에 요청을 전달하는지와 앱이 DB에 연결되는지를 함께 확인할 수 있었다.
 
 </details>
+
+---
+
+<details> 
+<summary>6주차 미션</summary>
+
+## 모니터링 시스템 구축
+
+모니터링 스택으로 Spring Boot Actuator, Micrometer, Prometheus, Grafana를 사용했다.
+
+Spring Boot 4.1.1의 Actuator와 Micrometer로 HTTP 요청 수, 응답 시간, JVM 상태, HikariCP 커넥션 풀 상태를 계측했다. 
+
+Micrometer의 Prometheus 레지스트리는 이 메트릭을 내부 관리 포트의 `app:8081/actuator/prometheus`에서 제공한다.
+
+Prometheus 3.16.0은 해당 엔드포인트를 15초마다 읽어 시계열로 저장한다. 
+
+Grafana 13.3.1은 Prometheus를 데이터 소스로 연결해, 예매와 매점 주문의 요청량·지연·오류율을 DB 커넥션 대기와 같은 시간대에 비교할 수 있게 구성했다.
+
+처음에는 Docker Compose로 앱, MySQL, Prometheus, Grafana를 함께 실행했다.
+기존 로컬 데이터를 활용한 테스트에서는 Compose의 `-f -` 옵션으로 DB 접속 주소를 덮어써 앱 컨테이너를 맥의 MySQL(`host.docker.internal:3306`)에 연결했다.
+
+## 예매 매점 주문 모니터링 대시보드 구축 
+
+처음에는 로컬 Grafana 화면에서 상영 회차 조회 API(`GET /api/screenings`)의 RPS와 p95 패널을 직접 만들었다. 이 과정에서 Prometheus 데이터 소스를 연결하고 각 지표를 조회하는 방법을 확인했다.
+
+![Grafana 화면에서 직접 만든 상영 회차 조회 대시보드](docs/6주차/grafana-screenings-dashboard.png)
+
+로컬 Grafana 화면에서 저장한 대시보드는 해당 Grafana의 데이터베이스에만 보관된다.
+
+하지만 대시보드 JSON과 자동 등록 설정, Prometheus 데이터 소스 설정을 저장소에 넣으면 예매,매점 주문 대시보드를 팀원도 같은 구성으로 실행할 수 있어
+<br>추후에 프로젝트를 진행할 때 팀원이 Docker Compose로 Grafana를 실행하면 같은 쿼리, 단위, 패널 배치가 자동으로 적용되어 협업에 용이하다는 걸 알게되었다. 
+
+추가적으로 쿼리나 패널의 변경 이력은 Git에서 검토할 수 있고, Grafana 데이터 볼륨을 새로 만들어도 저장소의 설정으로 대시보드를 복원할 수 있다는 점을 알게 되어 코드 작성으로 변경하였다.
+
+![파일에서 자동 등록한 CGV 예매·매점 주문 생성 대시보드](docs/6주차/grafana-creation-dashboard.png)
+
+응답 코드별 RPS 패널에서 예매·매점 주문 생성의 `201` 성공 응답과 예매 요청의 `409` 충돌 응답이 구분되어 기록되는 것을 확인했다.
+
+| 패널 | 구성 이유 |
+| --- | --- |
+| 생성 요청량(RPS)과 p95 응답 시간 | `POST /api/reservations`와 `POST /api/theaters/{theaterId}/store/orders`의 부하와 지연을 같은 시간대에 비교한다. 매점 주문의 영화관 ID는 경로 템플릿으로 집계한다. |
+| 생성 5xx 오류율 | 각 API에서 서버 오류가 난 요청의 비율을 확인한다. 정상 요청만 들어온 구간은 0%, 요청이 없던 구간은 빈 값으로 표시한다. |
+| DB 커넥션 대기 수 | p95가 상승한 구간에 CGV 앱의 HikariCP 커넥션 대기도 증가했는지 확인한다. |
+| API별 응답 코드 RPS | `201` 생성 성공과 `409` 충돌의 초당 건수를 비교한다. 예매 좌석 경합이나 매점 재고 부족이 발생한 구간을 찾을 수 있다. |
+
+로컬 Swagger에서 테스트 계정으로 로그인해 상영 시작 전 회차의 빈 좌석으로 예매하고, 재고가 있는 상품으로 매점 주문을 생성한다. Prometheus 수집 간격을 두고 요청을 반복한 뒤 응답 코드 패널에서 `201`을 확인한다. 
+
+좌석 중복 요청의 `SEAT409`와 재고 초과 주문의 `STORE_STOCK409`는 각 패널의 `409` 시계열에서 확인할 수 있다. 두 API에서 `201`은 결제 대기 상태의 생성 성공을 뜻한다.
+
+
+</details>
