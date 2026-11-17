@@ -2521,6 +2521,81 @@ EC2에서 Docker Hub 이미지 내려받기
 <details> 
 <summary>6주차 미션</summary>
 
+## 팀 단위과제
+팀 - Nailroad
+- 아키텍처 구조도
+
+    ![Nailroad AWS 인프라 및 Grafana Cloud 모니터링 아키텍처](docs/6주차/nailroad-infrastructure.png)
+
+- SLI/SLO 설정
+
+    | 대상 | SLI | SLO |
+    | --- | --- | --- |
+    | **디자인 이미지 로딩 성공률** | 화면에 표시할 이미지 중 정상 로딩을 완료한 건수 ÷ 전체 로딩 시도 건수 | 최근 4주간 **99% 이상** |
+    | **디자인 이미지 로딩 속도** | 화면에서 로딩을 시작해 **1.5초 이내**에 완료한 건수 ÷ 전체 로딩 시도 건수 | 최근 4주간 **95% 이상** |
+    | **견적 사진 업로드 성공률** | 저장소에 업로드가 완료된 건수 ÷ 유효한 업로드 시도 건수 | 최근 4주간 **99% 이상** |
+    | **견적 사진 업로드 속도** | **5초 이내**에 업로드를 완료한 건수 ÷ 유효한 업로드 시도 건수 | 최근 4주간 **95% 이상** |
+    
+    두 SLI의 분모는 **운영 환경에서 Nginx가 받은 견적 제출 요청**
+
+- Alert 기준 설정
+
+    | 알림 | 초기 발동 기준 | 담당자의 첫 확인 |
+    | --- | --- | --- |
+    | **긴급 · API 접속 불가** | 외부에서 `/actuator/health`를 **1분마다** 호출. 비정상 응답 또는 **3초 타임아웃**이 **3회 연속** 발생 | Nginx와 앱 컨테이너 상태, 최근 배포 확인 |
+    | **경고 · 견적 제출 실패 증가** | 최근 **10분간** 견적 제출 실패 **3건 이상** | HTTP 상태와 `error_code`로 실패 유형 확인 |
+    | **경고 · 견적 제출 지연** | 최근 **15분간** 대상 요청 **20건 이상**이고, **500ms 이내 성공률이 90% 미만** | Nginx 요청시간과 DB 커넥션 대기 상태 확인 |
+    | **경고 · 계측 중단** | Actuator 수집 상태가 **5분 연속** 비정상이거나 수집 데이터가 없음 | Alloy 상태와 수집 엔드포인트 확인 |
+    
+    수신 채널 예시 : Discord → **`#nailroad-alerts`**
+    
+    스터디 자료 활용…?! https://dldusgh318.github.io/posts/Grafana-Cloud-%EB%8C%80%EC%8B%9C%EB%B3%B4%EB%93%9C%EC%99%80-Discord-%EC%95%8C%EB%A6%BC/
+    
+    **요청이 0건인 구간은 SLI를 미산출로 표시**하고, 수집이 끊긴 경우에는 계측 중단 알림
+
+- 수집할 Telemetry
+
+    | 신호 | 수집할 값 | 용도 |
+    | --- | --- | --- |
+    | **Metrics/요청 품질** | Nginx 접근 로그에서 `전체 대상 요청 수`, `성공·실패 건수`, `500ms 이내 성공 건수` 집계 | SLO 계산과 실패·지연 알림 |
+    | **Metrics /원인 조사** | Actuator에서 **30초마다** `JVM 힙 사용량`, `DB 커넥션 풀 사용·대기 수` 수집 | 메모리나 DB 커넥션 병목 확인 |
+    | **Events** | 운영 배포 결과마다 `시각`, `환경`, `커밋 SHA`, `성공 여부` 기록 | 장애가 배포 직후 시작됐는지 확인 |
+    | **Logs** | Nginx의 요청 결과와 Spring Boot의 예외 로그를 `request_id`로 연결 | 실패 요청 한 건의 원인 조회 |
+    | **Traces** | API와 PostgreSQL 중 지연 구간을 구분하기 어려워지면 `HTTP 요청 → JDBC 호출`부터 계측 | 느린 요청이 시간을 쓴 구간 확인 |
+    
+    **Alloy → Grafana Cloud Prometheus/Loki**
+    
+    메트릭 라벨에는 `environment`, `route`, `status`처럼 값의 종류가 제한된 항목을 쓰고, `request_id`는 개별 로그에서 검색
+
+- 로깅 컨벤션 
+    - **형식**: JSON. `timestamp` UTC, `duration_ms`와 `status`는 숫자로 기록합니다.
+    - **이벤트와 결과**: `event: "estimate.submit"`,`outcome: "success"/"rejected"/"failure"`로 기록합니다. <br>정상 완료는 `INFO`, 재시도 후 복구는 `WARN`, 견적 저장을 완료하지 못한 서버 오류는 `ERROR`입니다.
+    - **이벤트 원인을 파악하는 데 필요한 추가 정보**: `context`를 사용한다. 추가 정보가 없으면 `context`를 생략하고, 파일 크기는 바이트 단위의 숫자로 기록한다. 실제 파일명, 사진 URL, 요청 본문은 기록에서 제외한다.
+    - **요청 연결**: Nginx에서 생성한 `request_id`를 Spring Boot에 전달하고, 앱 로그에는 MDC로 같은 값을 넣는 방식으로 맞춥니다. 예외 원인과 스택은 기존 전역 예외 처리 지점에서 한 번 기록합니다.
+    - **수집 제외**:  인증 토큰, 쿠키, 요청 본문, 견적 사진 URL, 상세 위치, 고객 자유 입력 내용입니다. Nailroad의 견적 엔티티에 사진 URL과 위치, 고객 요청사항이 있으므로 로그를 만들 때 필요한 필드만 골라 기록합니다.
+
+    ```json
+  // 예시
+    {
+      "timestamp": "2026-11-17T06:00:00Z",
+      "level": "ERROR",
+      "service": "nailroad-api",
+      "environment": "prod",
+      "event": "estimate.image.upload",
+      "outcome": "failure",
+      "request_id": "req-8f39",
+      "status": 504,
+      "duration_ms": 5002,
+      "error_code": "IMAGE_UPLOAD_TIMEOUT",
+      "context": {
+        "image_role": "estimate_reference",
+        "file_size_bytes": 1048576,
+        "mime_type": "image/jpeg",
+        "failure_stage": "storage_upload"
+      }
+    }
+    ```
+
 ## 모니터링 시스템 구축
 
 모니터링 스택으로 Spring Boot Actuator, Micrometer, Prometheus, Grafana를 사용했다.
