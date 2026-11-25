@@ -95,9 +95,7 @@ public class ScreeningService {
 
     // 전체 상영 회차를 시작 시각 순으로 조회한다.
     public List<ScreeningResDTO> getScreenings() {
-        return screeningRepository.findAllByOrderByStartsAtAscIdAsc().stream()
-                .map(ScreeningResDTO::from)
-                .toList();
+        return List.copyOf(screeningRepository.findAllSummaries());
     }
 
     // 회차의 좌석별 가격과 예매 가능 여부를 조회한다.
